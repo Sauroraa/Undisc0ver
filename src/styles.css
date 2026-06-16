@@ -787,6 +787,44 @@ h1, h2, h3, p { margin-top: 0; }
   pointer-events: none;
   position: absolute;
 }
+.hero-empty-catalog {
+  align-items: center;
+  grid-template-columns: 1fr;
+  min-height: 480px;
+}
+.hero-empty-catalog > div {
+  align-content: center;
+  display: grid;
+  gap: 14px;
+  justify-items: start;
+  max-width: 420px;
+  padding: 28px;
+  position: relative;
+  z-index: 1;
+}
+.hero-empty-catalog .brand-mark {
+  height: 58px;
+  width: 58px;
+}
+.hero-empty-catalog span {
+  color: var(--accent);
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.hero-empty-catalog strong {
+  color: white;
+  font-size: clamp(32px, 4vw, 56px);
+  letter-spacing: -.04em;
+  line-height: .9;
+}
+.hero-empty-catalog small {
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1.45;
+}
 .hero-focus-release,
 .hero-compact-release,
 .hero-release-strip {

@@ -11,6 +11,17 @@ services:
       NODE_ENV: production
       PORT: 3001
       SQLITE_DB_PATH: /data/undiscover.db
+      UPLOAD_DIR: /data/uploads
+      MAX_AUDIO_UPLOAD_MB: ${MAX_AUDIO_UPLOAD_MB:-500}
+      SEED_DEMO_DATA: ${SEED_DEMO_DATA:-false}
+      PURGE_DEMO_DATA: ${PURGE_DEMO_DATA:-true}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      ADMIN_NAME: ${ADMIN_NAME:-Undiscover Admin}
+      COPYRIGHT_SCAN_PROVIDER: ${COPYRIGHT_SCAN_PROVIDER:-off}
+      COPYRIGHT_TAKEDOWN_EMAIL: ${COPYRIGHT_TAKEDOWN_EMAIL:-copyright@undisc0ver.com}
+      COPYRIGHT_BLOCK_THRESHOLD: ${COPYRIGHT_BLOCK_THRESHOLD:-80}
+      COPYRIGHT_REVIEW_THRESHOLD: ${COPYRIGHT_REVIEW_THRESHOLD:-45}
       DATABASE_URL: mysql://${MARIADB_USER:-undiscover}:${MARIADB_PASSWORD:-change_me}@mariadb:3306/${MARIADB_DATABASE:-undiscover}
     depends_on:
       mariadb:

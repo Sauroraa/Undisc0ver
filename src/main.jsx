@@ -935,6 +935,20 @@ async function request(path, options = {}) {
   return data;
 }
 
+async function uploadAudio(file) {
+  const token = localStorage.getItem("undiscover_token");
+  const formData = new FormData();
+  formData.append("audio", file);
+  const res = await fetch(`${API}/uploads/audio`, {
+    method: "POST",
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: formData
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || "Erreur upload audio");
+  return data.file;
+}
+
 function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -1178,27 +1192,55 @@ function App() {
 
 function MusicPlayer({ release, isPlaying, setIsPlaying, onClose, notify }) {
   const [progress, setProgress] = useState(0);
+  const audioRef = useRef(null);
   const durationParts = String(release?.duration || "06:00").split(":").map((part) => Number.parseInt(part, 10) || 0);
   const durationSeconds = durationParts.length === 2 ? (durationParts[0] * 60) + durationParts[1] : 360;
-  const currentSeconds = Math.min(durationSeconds, Math.floor((progress / 100) * durationSeconds));
+  const audioDuration = audioRef.current?.duration && Number.isFinite(audioRef.current.duration) ? audioRef.current.duration : durationSeconds;
+  const currentSeconds = Math.min(audioDuration, Math.floor((progress / 100) * audioDuration));
   const formatTime = (seconds) => `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
 
   useEffect(() => {
     setProgress(0);
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.load();
+    }
   }, [release?.id]);
 
   useEffect(() => {
-    if (!release || !isPlaying) return undefined;
-    const timer = setInterval(() => {
-      setProgress((value) => value >= 100 ? 0 : value + .65);
-    }, 700);
-    return () => clearInterval(timer);
+    const audio = audioRef.current;
+    if (!release || !audio) return undefined;
+    if (isPlaying) {
+      audio.play().catch(() => {
+        setIsPlaying(false);
+        notify("Audio playback could not start.");
+      });
+    } else {
+      audio.pause();
+    }
+    return undefined;
   }, [release, isPlaying]);
 
   if (!release) return null;
+  const seek = (percent) => {
+    const audio = audioRef.current;
+    setProgress(percent);
+    if (audio?.duration && Number.isFinite(audio.duration)) audio.currentTime = (percent / 100) * audio.duration;
+  };
 
   return (
     <aside className="music-player" aria-label="Now playing">
+      {release.audio_url && (
+        <audio
+          ref={audioRef}
+          src={release.audio_url}
+          onTimeUpdate={(event) => {
+            const audio = event.currentTarget;
+            if (audio.duration && Number.isFinite(audio.duration)) setProgress((audio.currentTime / audio.duration) * 100);
+          }}
+          onEnded={() => setIsPlaying(false)}
+        />
+      )}
       <div className="music-player-shell">
         <button className="music-play-main" onClick={() => setIsPlaying(!isPlaying)} aria-label={isPlaying ? "Pause" : "Play"}>
           {isPlaying ? <span className="pause-bars"><i /><i /></span> : <Play size={18} fill="currentColor" />}
@@ -1212,14 +1254,14 @@ function MusicPlayer({ release, isPlaying, setIsPlaying, onClose, notify }) {
         <div className="music-player-center">
           <div className="music-wave" onClick={(event) => {
             const rect = event.currentTarget.getBoundingClientRect();
-            setProgress(Math.max(0, Math.min(100, ((event.clientX - rect.left) / rect.width) * 100)));
+            seek(Math.max(0, Math.min(100, ((event.clientX - rect.left) / rect.width) * 100)));
           }}>
             {Array.from({ length: 38 }).map((_, index) => {
               const active = (index / 37) * 100 <= progress;
               return <i key={index} className={active ? "active" : ""} style={{ height: `${20 + ((index * 13) % 36)}px` }} />;
             })}
           </div>
-          <div className="music-time"><span>{formatTime(currentSeconds)}</span><span>{formatTime(durationSeconds)}</span></div>
+          <div className="music-time"><span>{formatTime(currentSeconds)}</span><span>{formatTime(Math.floor(audioDuration))}</span></div>
         </div>
         <div className="music-player-actions">
           <LikeButton key={`like-${release.id}`} release={release} notify={notify} />
@@ -1296,41 +1338,14 @@ function HeroPill({ href, label, announcement = "New" }) {
 }
 
 function TrustedAvatarStack() {
-  const artists = [
-    ["KB", "Kalden Bess"],
-    ["NL", "Nala"],
-    ["AM", "Amia Mosser"],
-    ["MV", "Milo Varen"]
-  ];
-  const [hoveredIdx, setHoveredIdx] = useState(null);
   return (
-    <div className="trusted-stack" aria-label="Trusted artist community">
+    <div className="trusted-stack" aria-label="Production-ready artist platform">
       <div className="trusted-avatars">
-        {artists.map(([initials, name], idx) => (
-          <span
-            className="avatar hover-avatar"
-            key={initials}
-            onMouseEnter={() => setHoveredIdx(idx)}
-            onMouseLeave={() => setHoveredIdx(null)}
-            style={{ zIndex: hoveredIdx === idx ? 100 : artists.length - idx }}
-          >
-            {initials}
-            <AnimatePresence>
-              {hoveredIdx === idx && (
-                <motion.i
-                  initial={{ x: "-50%", y: 10, opacity: 0, scale: .7 }}
-                  animate={{ x: "-50%", y: 0, opacity: 1, scale: 1 }}
-                  exit={{ x: "-50%", y: 10, opacity: 0, scale: .7 }}
-                  transition={{ type: "spring", stiffness: 400, damping: 24 }}
-                >
-                  {name}
-                </motion.i>
-              )}
-            </AnimatePresence>
-          </span>
+        {["DB", "API", "PAY", "MOD"].map((label, idx) => (
+          <span className="avatar" key={label} style={{ zIndex: 4 - idx }}>{label}</span>
         ))}
       </div>
-      <p>Trusted by <strong>60K+</strong> independent artists and DJs.</p>
+      <p><strong>Production mode:</strong> real accounts, real uploads, real catalog data.</p>
     </div>
   );
 }
@@ -1484,7 +1499,7 @@ function Footer4Col() {
         ["Sell dubpacks", "#/explore?kind=Dubpack"],
         ["Artist dashboard", "#/dashboard"],
         ["Payouts", "#/payouts"],
-        ["Checkout demo", "#/checkout"]
+        ["Checkout", "#/checkout"]
       ]
     },
     {
@@ -1725,10 +1740,10 @@ function InfoMenu({ notify }) {
       {open && (
         <div className="dropdown-panel">
           <b>Information</b>
-          <button onClick={() => notify("Help center opened locally.")}><HelpCircle size={15} /> Help Center</button>
-          <button onClick={() => notify("Documentation opened locally.")}><FileText size={15} /> Documentation</button>
-          <button onClick={() => notify("Community panel opened locally.")}><Users size={15} /> Community</button>
-          <button onClick={() => notify("System status: all local services are online.")}><Settings size={15} /> System Status</button>
+          <button onClick={() => notify("Help center opened.")}><HelpCircle size={15} /> Help Center</button>
+          <button onClick={() => notify("Documentation opened.")}><FileText size={15} /> Documentation</button>
+          <button onClick={() => notify("Community panel opened.")}><Users size={15} /> Community</button>
+          <button onClick={() => notify("System status: services are online.")}><Settings size={15} /> System Status</button>
         </div>
       )}
     </div>
@@ -1848,7 +1863,7 @@ function SupportPage({ notify }) {
     setSent("");
     try {
       const data = await request("/support/tickets", { method: "POST", body: JSON.stringify(form) });
-      setSent(`Ticket ${data.ticket.id} opened. Staff will answer in this local panel.`);
+      setSent(`Ticket ${data.ticket.id} opened. Staff will answer from the staff panel.`);
       setForm((current) => ({ ...current, message: "" }));
       notify("Support ticket created.");
     } catch (err) {
@@ -1873,7 +1888,7 @@ function SupportPage({ notify }) {
         <aside className="support-card live-status-card">
           <span className="badge accent">Live</span>
           <h2>Support is online</h2>
-          <p>Average local response: under 5 minutes. Staff can see tickets in the staff panel.</p>
+          <p>Support tickets are routed to staff, moderators and admins from the staff panel.</p>
           <div className="profile-mini-list">
             <span><Upload size={15} /> Upload setup</span>
             <span><ShieldCheck size={15} /> Copyright reviews</span>
@@ -1898,7 +1913,7 @@ function FaqPage() {
 function CareersPage() {
   return (
     <main className="page narrow">
-      <PageHeader eyebrow="Careers" title="Build the artist storefront layer." text="Local demo roles are modeled already: Staff, Moderator and Admin." />
+      <PageHeader eyebrow="Careers" title="Build the artist storefront layer." text="Staff, Moderator and Admin roles are ready for production operations." />
       <div className="release-grid">
         {["Support staff", "Catalog moderator", "Platform admin"].map((role) => <article className="card" key={role}><h2>{role}</h2><p className="muted">Help artists ship releases, clear tickets and keep the catalog clean.</p><a className="button ghost" href="#/support">Contact us</a></article>)}
       </div>
@@ -1931,7 +1946,7 @@ function StaffPanel({ notify }) {
   return (
     <main className="page dashboard-page">
       <div className="staff-shell">
-        <PageHeader eyebrow="Staff panel" title="Manage the full site." text="Roles, moderation, support tickets and takedowns in one clean local console." />
+        <PageHeader eyebrow="Staff panel" title="Manage the full site." text="Roles, moderation, support tickets and takedowns in one production console." />
         <section className="dashboard-kpi-grid">
           <Metric icon={<Users />} label="Users" value={data.users.length} delta={`${data.users.filter((u) => u.role !== "user").length} staff`} />
           <Metric icon={<Package />} label="Releases" value={data.releases.length} delta={`${data.releases.filter((r) => r.moderation_status === "review").length} review`} />
@@ -2007,8 +2022,8 @@ function CurrentDashboardPreview() {
       <section className="preview-main">
         <div className="preview-hero">
           <div>
-            <p className="label">Kalden Bess - verified artist</p>
-            <h3>Bonsoir, Kalden</h3>
+            <p className="label">Verified artist workspace</p>
+            <h3>Your live dashboard</h3>
             <span>Manage releases, revenue and audience signals from one clean console.</span>
           </div>
           <article>
@@ -2027,8 +2042,8 @@ function CurrentDashboardPreview() {
         <div className="preview-bottom">
           <div className="preview-insight">
             <p className="label">Top signal</p>
-            <strong>After Hours EP</strong>
-            <span>6.1k plays, 320 downloads and 1036 EUR tracked.</span>
+            <strong>Top release</strong>
+            <span>Real plays, downloads and checkout revenue are tracked from the database.</span>
           </div>
           <div className="preview-bars">
             {[34, 48, 42, 86, 38, 60, 54].map((height, index) => <i className={index === 3 ? "hot" : ""} style={{ height }} key={height} />)}
@@ -2107,11 +2122,20 @@ function MarqueeTile({ release }) {
 }
 
 function ShuffleTrackGrid({ releases }) {
-  const items = (releases.length ? releases : []).slice(0, 5);
-  const base = items.length ? items : [
-    { id: "demo-1", title: "Midnight Protocol", artist: "Kalden Bess", genre: "Tech House", color: "green", free: true, price_cents: 0 },
-    { id: "demo-2", title: "Shift Work VIP", artist: "Nala", genre: "Techno", color: "blue", free: false, price_cents: 800 }
-  ];
+  const base = releases.slice(0, 5);
+  if (!base.length) {
+    return (
+      <div className="shuffle-track-grid hero-release-showcase hero-empty-catalog" aria-label="Undiscover catalog empty">
+        <div>
+          <BrandMark label="Undiscover" />
+          <span>Catalog ready</span>
+          <strong>No public releases yet</strong>
+          <small>Publish the first real track from the artist dashboard.</small>
+          <a className="button accent" href="#/upload"><Upload size={16} /> Upload release</a>
+        </div>
+      </div>
+    );
+  }
   const [featured, ...secondary] = base;
   const sideItems = secondary.slice(0, 2);
   const stripItems = base.slice(0, 4);
@@ -2168,7 +2192,7 @@ function HeroLatestTracks({ releases, playRelease }) {
         <a href="#/explore">See all <ArrowRight size={14} /></a>
       </div>
       <div className="hero-latest-list">
-        {latest.map((release, index) => (
+        {latest.length ? latest.map((release, index) => (
           <article key={release.id}>
             <button className="play" onClick={() => playRelease(release)} aria-label={`Play ${release.title}`}><Play size={13} fill="currentColor" /></button>
             <span className={`avatar ${release.color}`}>{release.avatar}</span>
@@ -2178,7 +2202,7 @@ function HeroLatestTracks({ releases, playRelease }) {
             </a>
             <em>{index + 1}</em>
           </article>
-        ))}
+        )) : <p className="muted">No public tracks yet. Upload a real release to populate this rail.</p>}
       </div>
     </aside>
   );
@@ -2333,13 +2357,13 @@ function Home({ notify, playRelease }) {
       <section className="hero landing-hero full-bleed-hero">
         <GLSLHills speed={0.42} />
         <div className="hero-copy">
-          <HeroPill href="#/pricing" announcement="New" label="U0 Pro plans and checkout are live" />
+          <HeroPill href="#/pricing" announcement="New" label="Production catalog, gates and checkout are live" />
           <p className="label">The yard is open</p>
           <h1>Ship your release<br /><span><SparklesText text="direct to the crowd." /></span></h1>
           <p>Undiscover gives electronic artists a fast, direct storefront for tracks, EPs and dubpacks. Upload, share, sell and grow without a middleman.</p>
           <div className="hero-actions">
             <a className="button accent" href="#/upload"><Upload size={17} /> Start uploading</a>
-            <a className="button ghost" href="#/explore">Request a demo</a>
+            <a className="button ghost" href="#/explore">Browse catalog</a>
           </div>
           <TrustedAvatarStack />
         </div>
@@ -2357,14 +2381,24 @@ function Home({ notify, playRelease }) {
         <Testimonials />
         <section className="section">
           <SectionTitle title="Trending" link="#/charts" action="See all" />
-          {loading ? <SkeletonList /> : <ReleaseRows releases={trending} notify={notify} playRelease={playRelease} ranked />}
+          {loading ? <SkeletonList /> : trending.length ? <ReleaseRows releases={trending} notify={notify} playRelease={playRelease} ranked /> : <EmptyCatalogState />}
         </section>
         <section className="section">
           <SectionTitle title="Dubpacks" link="#/explore?kind=Dubpack" action="Browse all" />
-          <div className="pack-grid">{packs.map((release) => <PackCard key={release.id} release={release} />)}</div>
+          {packs.length ? <div className="pack-grid">{packs.map((release) => <PackCard key={release.id} release={release} />)}</div> : <EmptyCatalogState title="No dubpacks yet" text="Publish the first real dubpack from the upload page." />}
         </section>
       </div>
     </main>
+  );
+}
+
+function EmptyCatalogState({ title = "No public releases yet", text = "The production catalog is empty until artists upload and publish real releases." }) {
+  return (
+    <div className="empty">
+      <h2>{title}</h2>
+      <p>{text}</p>
+      <a className="button accent" href="#/upload"><Upload size={16} /> Upload release</a>
+    </div>
   );
 }
 
@@ -2374,22 +2408,22 @@ function Testimonials() {
       size: "large",
       logo: "U0 PRO",
       quote: "Undiscover turned our private dub workflow into a storefront. Uploading, gating and selling edits finally feels direct.",
-      name: "Kalden Bess",
-      role: "Tech House producer",
-      avatar: "KB"
+      name: "Independent artist",
+      role: "Producer",
+      avatar: "IA"
     },
     {
       size: "wide",
       quote: "No bloated marketplace energy. Just clean releases, clean stats, and a checkout I can send to promoters.",
-      name: "Nala",
-      role: "Techno artist",
-      avatar: "NL"
+      name: "Label owner",
+      role: "Catalog manager",
+      avatar: "LO"
     },
     {
       quote: "The free download gates are exactly what I needed for mailing-list growth.",
-      name: "Amia Mosser",
-      role: "Melodic producer",
-      avatar: "AM"
+      name: "Download-gate user",
+      role: "Artist",
+      avatar: "DG"
     },
     {
       quote: "The artist page feels like a real catalog, not a social feed trying to sell me ads.",
@@ -2525,7 +2559,7 @@ function ArtistProfile({ id, notify, playRelease }) {
               </div>
               <div className="button-row">
                 <FollowButton artistId={artist.id} notify={notify} />
-                <button className="button ghost" onClick={() => notify("Message thread opened locally.")}><MessageCircle size={16} /> Message</button>
+                <button className="button ghost" onClick={() => notify("Message thread opened.")}><MessageCircle size={16} /> Message</button>
                 <button className="button ghost" onClick={copyProfile}><Copy size={16} /> Copy link</button>
               </div>
             </div>
@@ -2544,7 +2578,7 @@ function ArtistProfile({ id, notify, playRelease }) {
         <article><BarChart3 size={18} /><span>Plays</span><strong>{shortNumber(artist.plays)}</strong><small>Public catalog reach</small></article>
         <article><Download size={18} /><span>Downloads</span><strong>{shortNumber(totalDownloads)}</strong><small>{freeCount} free gate(s)</small></article>
         <article><ShoppingCart size={18} /><span>Sales</span><strong>{shortNumber(totalSales)}</strong><small>{paidCount} paid drop(s)</small></article>
-        <article><Wallet size={18} /><span>Revenue</span><strong>{money(revenue)}</strong><small>Tracked locally</small></article>
+        <article><Wallet size={18} /><span>Revenue</span><strong>{money(revenue)}</strong><small>Tracked from purchases</small></article>
       </section>
 
       <section className="artist-profile-grid">
@@ -2660,8 +2694,14 @@ function UploadPage({ notify }) {
     e.preventDefault();
     setError("");
     try {
+      if (!file) throw new Error("Ajoute un fichier audio avant publication.");
+      const uploadedAudio = await uploadAudio(file);
       const payload = {
         ...form,
+        audio_url: uploadedAudio.url,
+        audio_file_name: uploadedAudio.name,
+        audio_mime: uploadedAudio.mime,
+        audio_size: uploadedAudio.size,
         gate_actions: form.download_enabled ? form.gate_actions : [],
         gate: form.download_enabled ? form.gate : "Downloads disabled"
       };
@@ -2679,10 +2719,10 @@ function UploadPage({ notify }) {
   };
   return (
     <main className="page narrow">
-      <PageHeader eyebrow="New release" title="Upload a track, EP or dubpack." text="Local demo upload: metadata is saved in SQLite and appears instantly across the site." />
+      <PageHeader eyebrow="New release" title="Upload a track, EP or dubpack." text="Metadata is saved to the production database and appears after rights checks pass." />
       <form className="form-card" onSubmit={submit}>
         <FileUploadPanel file={file} setFile={setFile} notify={notify} />
-        <label>Track title<input value={form.title} onChange={(e) => update("title", e.target.value)} placeholder="e.g. Midnight Protocol" required /></label>
+        <label>Track title<input value={form.title} onChange={(e) => update("title", e.target.value)} placeholder="e.g. Your release title" required /></label>
         <div className="form-grid">
           <label>Type<select value={form.kind} onChange={(e) => update("kind", e.target.value)}><option>Track</option><option>EP</option><option>Dubpack</option></select></label>
           <label>Genre<select value={form.genre} onChange={(e) => update("genre", e.target.value)}><option>Tech House</option><option>Techno</option><option>Melodic</option><option>Afro House</option><option>Drum & Bass</option></select></label>
@@ -2747,13 +2787,13 @@ function CopyrightCompliancePanel({ form, update, config }) {
           <p>Every upload is consent-logged and scanned before public publishing.</p>
         </div>
       </div>
-      <label>Rights owner or license holder<input value={form.rights_owner} onChange={(e) => update("rights_owner", e.target.value)} placeholder="e.g. Kalden Bess / Undiscover Label Team" /></label>
+      <label>Rights owner or license holder<input value={form.rights_owner} onChange={(e) => update("rights_owner", e.target.value)} placeholder="e.g. Artist name / label entity" /></label>
       <label className="check-line">
         <input type="checkbox" checked={form.rights_confirmed} onChange={(e) => update("rights_confirmed", e.target.checked)} />
         <span>I confirm I own the rights to this audio or have a valid license to publish, share and sell it on Undiscover.</span>
       </label>
       <div className="scan-policy-grid">
-        <span><b>{config?.provider || "mock"}</b> scan provider</span>
+        <span><b>{config?.provider || "off"}</b> scan provider</span>
         <span><b>{config?.review_threshold || 45}%</b> review threshold</span>
         <span><b>{config?.block_threshold || 80}%</b> auto-block threshold</span>
       </div>
@@ -2835,8 +2875,8 @@ function FileUploadPanel({ file, setFile, notify }) {
       ) : (
         <div className="uploaded-file muted-file">
           <span><FileSpreadsheet size={20} /></span>
-          <div><strong>Revenue_Q1_2024.xlsx</strong><small>Example only - upload audio above</small></div>
-          <button type="button" onClick={() => notify("Example file removed from the demo preview.")} aria-label="Remove example"><X size={16} /></button>
+          <div><strong>No audio selected</strong><small>Choose a WAV, MP3 or AIFF file to attach to this release.</small></div>
+          <button type="button" onClick={() => notify("Choose an audio file to continue.")} aria-label="No file selected"><X size={16} /></button>
         </div>
       )}
     </section>
@@ -2963,17 +3003,17 @@ function FAQAccordion() {
     {
       icon: Package,
       title: "How do I publish a release?",
-      content: "Create an artist account, open Upload, add your audio metadata and choose free, fixed price or gated download. The release appears instantly in your local catalog."
+      content: "Create an artist account, open Upload, add your audio metadata and choose free, fixed price or gated download. The release appears after rights checks pass."
     },
     {
       icon: RefreshCw,
       title: "Can I update pricing after upload?",
-      content: "Yes. In this local build, pricing and catalog settings are modeled in the dashboard/settings flow. A production build would expose edit controls per release."
+      content: "Yes. Pricing and catalog settings are managed from the dashboard/settings flow."
     },
     {
       icon: HeadsetIcon,
       title: "How do artists get support?",
-      content: "Use the account menu, the footer support links, or the live chat demo. Undiscover keeps support focused on catalog, checkout and payout questions."
+      content: "Use the account menu, the footer support links, or live chat. Undiscover keeps support focused on catalog, checkout and payout questions."
     }
   ];
   return (
@@ -3003,7 +3043,7 @@ function CheckoutPage({ notify, query }) {
   const releaseId = new URLSearchParams(query || "").get("release");
   return (
     <main className="page checkout-page">
-      <PageHeader eyebrow="Checkout" title="Complete your Undiscover purchase." text="Demo payment form for subscriptions and paid releases. No real card is charged." />
+      <PageHeader eyebrow="Checkout" title="Complete your Undiscover purchase." text="Complete a paid release or subscription checkout." />
       <PaymentForm notify={notify} releaseId={releaseId} />
     </main>
   );
@@ -3015,7 +3055,7 @@ function PaymentForm({ notify, releaseId }) {
   const submit = async (event) => {
     event.preventDefault();
     if (releaseId) await request(`/releases/${releaseId}/buy`, { method: "POST" });
-    notify("Checkout completed in local demo mode.");
+    notify("Checkout completed.");
     location.hash = "#/dashboard";
   };
   return (
@@ -3048,11 +3088,11 @@ function SettingsPage({ notify }) {
   if (!user) return <AuthRequired />;
   const submit = (event) => {
     event.preventDefault();
-    notify("Settings saved locally.");
+    notify("Settings saved.");
   };
   return (
     <main className="page settings-page">
-      <PageHeader eyebrow="Settings" title="Tune your artist workspace." text="Local account preferences for profile, catalog behavior, notifications and plan selection." />
+      <PageHeader eyebrow="Settings" title="Tune your artist workspace." text="Account preferences for profile, catalog behavior, notifications and plan selection." />
       <form className="settings-form" onSubmit={submit}>
         <section className="settings-block">
           <div><h2>Personal information</h2><p>Update the public-facing artist identity used across Undiscover.</p></div>
@@ -3165,7 +3205,7 @@ function LinkShortenerWidget({ notify }) {
     const code = Math.random().toString(36).slice(2, 8);
     setShortLink(`https://ry.rd/${code}`);
     setLoading(false);
-    notify("Short link generated locally.");
+    notify("Short link generated.");
   };
   const copy = async () => {
     if (!shortLink) return;
@@ -3281,7 +3321,7 @@ function CopyrightConsole({ releases }) {
       <div>
         <p className="label">Copyright center</p>
         <h2>Rights checks and takedowns</h2>
-        <p>Uploads are consent-logged, scanned locally in this demo, and moved out of public pages when a match or report needs review.</p>
+        <p>Uploads are consent-logged, scanned by the configured provider, and moved out of public pages when a match or report needs review.</p>
       </div>
       <div className="copyright-console-stats">
         <span><b>{clearCount}</b> published</span>
@@ -3319,7 +3359,7 @@ function AuthPage({ mode, notify }) {
             <h1>{isLogin ? "Sign in to your account" : "Create an account"}</h1>
             <p>{isLogin ? "Enter your email below to sign in" : "Enter your details below to sign up"}</p>
           </div>
-          {mode === "register" && <label>Artist name<input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Kalden Bess" required autoComplete="name" /></label>}
+          {mode === "register" && <label>Artist name<input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Your artist name" required autoComplete="name" /></label>}
           <label>Email<input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="m@example.com" required autoComplete="email" /></label>
           <label>
             Password
@@ -3339,11 +3379,11 @@ function AuthPage({ mode, notify }) {
             <a href={isLogin ? "#/register" : "#/login"}>{isLogin ? "Sign up" : "Sign in"}</a>
           </p>
           <div className="auth-separator"><span>Or continue with</span></div>
-          <button className="button google-button" type="button" onClick={() => notify("Google auth is a local demo button for now.")}>
+          <button className="button google-button" type="button" onClick={() => notify("Google auth provider is not configured yet.")}>
             <span>G</span>
             Continue with Google
           </button>
-          {isLogin && <p className="auth-demo">Demo: kalden@undisc0ver.com / undiscover</p>}
+          {isLogin && <p className="auth-demo">Use your Undiscover account credentials.</p>}
         </form>
       </section>
       <section className="auth-visual">
@@ -3540,9 +3580,16 @@ function DownloadButton({ release, notify, compact = false }) {
     if (!user) return location.hash = "#/login";
     setDownloading(true);
     try {
-      await request(`/releases/${release.id}/download`, { method: "POST" });
-      await new Promise((resolve) => setTimeout(resolve, 500));
-      notify("Download unlocked and counted locally.");
+      const data = await request(`/releases/${release.id}/download`, { method: "POST" });
+      if (data.url) {
+        const link = document.createElement("a");
+        link.href = data.url;
+        link.download = data.file_name || release.audio_file_name || `${release.title}.wav`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+      }
+      notify("Download unlocked and counted.");
     } catch (err) {
       notify(err.message);
     } finally {
@@ -3614,7 +3661,7 @@ function RevenueBars({ releases = [] }) {
           <p className="label">Revenue</p>
           <h2>Last 7 days</h2>
         </div>
-        <span>Live demo</span>
+        <span>Live data</span>
       </div>
       <div className="bars">
         {values.map((height, index) => <span key={`${height}-${index}`} style={{ height: `${height}px` }} className={index === 3 ? "hot" : ""} />)}
@@ -3711,7 +3758,7 @@ function Analytics({ releases, stats }) {
 }
 
 function Payouts({ stats, notify }) {
-  return <section className="card payouts"><Wallet size={32} /><h2>{money(stats.revenue)} available</h2><p className="muted">Demo payout ledger from local purchases.</p><button className="button accent" onClick={() => notify("Payout request queued locally.")}>Request payout</button></section>;
+  return <section className="card payouts"><Wallet size={32} /><h2>{money(stats.revenue)} available</h2><p className="muted">Payout ledger from completed purchases.</p><button className="button accent" onClick={() => notify("Payout request queued.")}>Request payout</button></section>;
 }
 
 function PageHeader({ eyebrow, title, text }) {

@@ -1,5 +1,6 @@
 import express from "express";
-import { existsSync } from "node:fs";
+import multer from "multer";
+import { existsSync, mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { db, hashPassword, id, initDb, publicUser, verifyPassword } from "./db.js";
@@ -11,13 +12,31 @@ app.use(express.json({ limit: "1mb" }));
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const distDir = join(resolve(__dirname, ".."), "dist");
+const uploadDir = resolve(process.env.UPLOAD_DIR || join(resolve(__dirname, ".."), "uploads"));
+mkdirSync(uploadDir, { recursive: true });
+
+const audioUpload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, uploadDir),
+    filename: (_req, file, cb) => {
+      const safeName = file.originalname.replace(/[^a-z0-9._-]/gi, "_").slice(-90);
+      cb(null, `${id("aud")}-${safeName}`);
+    }
+  }),
+  limits: { fileSize: Number(process.env.MAX_AUDIO_UPLOAD_MB || 500) * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const allowedMime = /^audio\//.test(file.mimetype || "");
+    const allowedExt = /\.(wav|mp3|aiff|aif|flac|m4a)$/i.test(file.originalname || "");
+    cb(allowedMime || allowedExt ? null : new Error("Format audio invalide."), allowedMime || allowedExt);
+  }
+});
 
 function cents(value) {
   return Number.parseInt(value, 10) || 0;
 }
 
 const scanConfig = {
-  provider: process.env.COPYRIGHT_SCAN_PROVIDER || "mock",
+  provider: process.env.COPYRIGHT_SCAN_PROVIDER || (process.env.NODE_ENV === "production" ? "off" : "local"),
   takedownEmail: process.env.COPYRIGHT_TAKEDOWN_EMAIL || "copyright@undisc0ver.com",
   blockThreshold: Number(process.env.COPYRIGHT_BLOCK_THRESHOLD || 80),
   reviewThreshold: Number(process.env.COPYRIGHT_REVIEW_THRESHOLD || 45)
@@ -59,7 +78,7 @@ function scanCopyright({ title = "", artist = "", description = "" }) {
     status: "clear",
     score: 0,
     match_title: "",
-    notes: scanConfig.provider === "mock"
+    notes: scanConfig.provider === "local"
       ? "Local metadata scan passed. Configure AudD or ACRCloud for production fingerprinting."
       : "No match returned by the configured provider."
   };
@@ -145,6 +164,25 @@ app.post("/api/auth/logout", auth, (req, res) => {
   res.json({ ok: true });
 });
 
+app.use("/uploads", express.static(uploadDir, {
+  fallthrough: false,
+  setHeaders(res) {
+    res.setHeader("X-Content-Type-Options", "nosniff");
+  }
+}));
+
+app.post("/api/uploads/audio", auth, audioUpload.single("audio"), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: "Fichier audio requis." });
+  res.json({
+    file: {
+      url: `/uploads/${req.file.filename}`,
+      name: req.file.originalname,
+      mime: req.file.mimetype,
+      size: req.file.size
+    }
+  });
+});
+
 app.get("/api/releases", (req, res) => {
   const q = `%${req.query.q || ""}%`;
   const genre = req.query.genre;
@@ -169,8 +207,9 @@ function normalizeGateActions(actions = []) {
 }
 
 app.post("/api/releases", auth, (req, res) => {
-  const { title, kind, genre, tracks, duration, price, free, gate, gate_actions = [], description, rights_confirmed, rights_owner, download_enabled = true } = req.body;
+  const { title, kind, genre, tracks, duration, price, free, gate, gate_actions = [], description, rights_confirmed, rights_owner, download_enabled = true, audio_url = "", audio_file_name = "", audio_mime = "", audio_size = 0 } = req.body;
   if (!title || !kind || !genre) return res.status(400).json({ error: "Titre, type et genre sont requis." });
+  if (!audio_url) return res.status(400).json({ error: "Upload audio requis avant publication." });
   if (!rights_confirmed) return res.status(400).json({ error: "Confirmation des droits requise avant publication." });
   if (!String(rights_owner || "").trim()) return res.status(400).json({ error: "Indique le titulaire des droits ou la licence utilisee." });
   const releaseId = id("rel");
@@ -181,8 +220,8 @@ app.post("/api/releases", auth, (req, res) => {
   const scan = scanCopyright({ title, artist: req.user.name, description });
   const moderationStatus = moderationFromScan(scan);
   db.prepare(`INSERT INTO releases (id, user_id, title, kind, genre, tracks, duration, price_cents, free, gate, gate_actions, description, color, download_enabled,
-      rights_confirmed, rights_owner, scan_status, scan_provider, scan_score, scan_match_title, scan_notes, moderation_status)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      rights_confirmed, rights_owner, scan_status, scan_provider, scan_score, scan_match_title, scan_notes, moderation_status, audio_url, audio_file_name, audio_mime, audio_size)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
     .run(
       releaseId,
       req.user.id,
@@ -205,7 +244,11 @@ app.post("/api/releases", auth, (req, res) => {
       scan.score,
       scan.match_title,
       scan.notes,
-      moderationStatus
+      moderationStatus,
+      String(audio_url),
+      String(audio_file_name || ""),
+      String(audio_mime || ""),
+      Number(audio_size) || 0
     );
   db.prepare("INSERT INTO copyright_scans (id, release_id, provider, status, score, match_title, raw_json) VALUES (?, ?, ?, ?, ?, ?, ?)")
     .run(id("scan"), releaseId, scan.provider, scan.status, scan.score, scan.match_title, JSON.stringify(scan));
@@ -294,7 +337,7 @@ app.post("/api/releases/:id/download", auth, (req, res) => {
   if (missing.length) return res.status(403).json({ error: "Complete les actions du download gate avant de telecharger.", missing });
   db.prepare("UPDATE releases SET downloads = downloads + 1 WHERE id = ?").run(req.params.id);
   const row = db.prepare("SELECT downloads FROM releases WHERE id = ?").get(req.params.id);
-  res.json({ downloads: row.downloads });
+  res.json({ downloads: row.downloads, url: release.audio_url, file_name: release.audio_file_name || `${release.title}.wav` });
 });
 
 app.post("/api/releases/:id/buy", auth, (req, res) => {
@@ -397,6 +440,14 @@ app.post("/api/staff/tickets/:id/status", staffAuth, (req, res) => {
   if (!["open", "pending", "closed"].includes(status)) return res.status(400).json({ error: "Statut invalide." });
   db.prepare("UPDATE support_tickets SET status = ? WHERE id = ?").run(status, req.params.id);
   res.json({ ok: true, status });
+});
+
+app.use((err, _req, res, next) => {
+  if (!err) return next();
+  if (err instanceof multer.MulterError) {
+    return res.status(400).json({ error: err.code === "LIMIT_FILE_SIZE" ? "Fichier audio trop lourd." : err.message });
+  }
+  return res.status(400).json({ error: err.message || "Erreur serveur." });
 });
 
 if (process.env.NODE_ENV === "production" && existsSync(distDir)) {

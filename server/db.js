@@ -11,6 +11,15 @@ mkdirSync(dirname(dbPath), { recursive: true });
 export const db = new DatabaseSync(dbPath);
 db.exec("PRAGMA foreign_keys = ON");
 
+const DEMO_USER_IDS = ["usr_kalden", "usr_nala", "usr_mosser"];
+const DEMO_RELEASE_IDS = ["rel_midnight", "rel_afterhours", "rel_summer", "rel_shift", "rel_technoids", "rel_dust", "rel_afro"];
+
+function envFlag(name, fallback = false) {
+  const value = process.env[name];
+  if (value === undefined) return fallback;
+  return ["1", "true", "yes", "on"].includes(String(value).toLowerCase());
+}
+
 export function id(prefix) {
   return `${prefix}_${randomUUID().replaceAll("-", "").slice(0, 18)}`;
 }
@@ -158,17 +167,64 @@ export function initDb() {
   addReleaseColumn("scan_notes", "TEXT NOT NULL DEFAULT ''");
   addReleaseColumn("moderation_status", "TEXT NOT NULL DEFAULT 'published'");
   addReleaseColumn("takedown_count", "INTEGER NOT NULL DEFAULT 0");
+  addReleaseColumn("audio_url", "TEXT NOT NULL DEFAULT ''");
+  addReleaseColumn("audio_file_name", "TEXT NOT NULL DEFAULT ''");
+  addReleaseColumn("audio_mime", "TEXT NOT NULL DEFAULT ''");
+  addReleaseColumn("audio_size", "INTEGER NOT NULL DEFAULT 0");
 
-  db.prepare("UPDATE users SET role = 'admin' WHERE id = 'usr_kalden'").run();
-  db.prepare("UPDATE users SET role = 'moderator' WHERE id = 'usr_nala'").run();
-  db.prepare("UPDATE users SET role = 'staff' WHERE id = 'usr_mosser'").run();
-  db.prepare("UPDATE users SET email = ?, password_hash = ? WHERE id = 'usr_kalden'").run("kalden@undisc0ver.com", hashPassword("undiscover"));
-  db.prepare("UPDATE users SET email = ?, password_hash = ? WHERE id = 'usr_nala'").run("nala@undisc0ver.com", hashPassword("undiscover"));
-  db.prepare("UPDATE users SET email = ?, password_hash = ? WHERE id = 'usr_mosser'").run("amia@undisc0ver.com", hashPassword("undiscover"));
+  const isProduction = process.env.NODE_ENV === "production";
+  const seedDemoData = envFlag("SEED_DEMO_DATA", !isProduction);
+  const purgeDemoData = envFlag("PURGE_DEMO_DATA", isProduction && !seedDemoData);
 
-  const count = db.prepare("SELECT COUNT(*) AS total FROM users").get().total;
-  if (count > 0) return;
+  if (purgeDemoData) removeDemoData();
+  ensureBootstrapAdmin();
 
+  if (!seedDemoData) return;
+
+  seedDemoDataSet();
+}
+
+function ensureBootstrapAdmin() {
+  const email = String(process.env.ADMIN_EMAIL || "").trim().toLowerCase();
+  const password = String(process.env.ADMIN_PASSWORD || "").trim();
+  const name = String(process.env.ADMIN_NAME || "Undiscover Admin").trim();
+  if (!email || !password) return;
+
+  const existing = db.prepare("SELECT id FROM users WHERE email = ?").get(email);
+  if (existing) {
+    db.prepare("UPDATE users SET role = 'admin', verified = 1, pro = 1 WHERE id = ?").run(existing.id);
+    return;
+  }
+
+  db.prepare(`INSERT INTO users (id, name, email, password_hash, avatar, genre, location, bio, verified, pro, role)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(id("usr"), name, email, hashPassword(password), initialsFor(name), "Electronic", "Production", "Platform owner.", 1, 1, "admin");
+}
+
+function initialsFor(name) {
+  return String(name || "Undiscover")
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((part) => part[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase() || "UD";
+}
+
+function removeDemoData() {
+  const deleteRelease = db.prepare("DELETE FROM releases WHERE id = ?");
+  for (const releaseId of DEMO_RELEASE_IDS) deleteRelease.run(releaseId);
+  const deleteSession = db.prepare("DELETE FROM sessions WHERE user_id = ?");
+  const deleteUser = db.prepare("DELETE FROM users WHERE id = ?");
+  for (const userId of DEMO_USER_IDS) {
+    deleteSession.run(userId);
+    deleteUser.run(userId);
+  }
+}
+
+function seedDemoDataSet() {
+  const existingDemo = db.prepare("SELECT COUNT(*) AS total FROM users WHERE id IN ('usr_kalden', 'usr_nala', 'usr_mosser')").get().total;
+  if (existingDemo > 0) return;
   const users = [
     ["usr_kalden", "Kalden Bess", "kalden@undisc0ver.com", "KB", "Tech House", "Paris, FR", "Producteur Tech House base a Paris. Releases sur Tronic, Terminal M et Respekt.", 1, 1],
     ["usr_nala", "Nala", "nala@undisc0ver.com", "NL", "Techno", "Berlin, DE", "Raw drums, club tools and late-night IDs.", 0, 1],
