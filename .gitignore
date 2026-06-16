@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.env
+server/*.db
+server/*.db-*
+artifacts/
+npm-debug.log*
+.DS_Store

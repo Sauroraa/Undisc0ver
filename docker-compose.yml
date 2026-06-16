@@ -1,0 +1,42 @@
+services:
+  app:
+    build:
+      context: .
+    image: undiscover-app:latest
+    container_name: undiscover-app
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      SQLITE_DB_PATH: /data/undiscover.db
+      DATABASE_URL: mysql://${MARIADB_USER:-undiscover}:${MARIADB_PASSWORD:-change_me}@mariadb:3306/${MARIADB_DATABASE:-undiscover}
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:3001:3001"
+    volumes:
+      - undiscover_data:/data
+
+  mariadb:
+    image: mariadb:11.4
+    container_name: undiscover-mariadb
+    restart: unless-stopped
+    environment:
+      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD:-change_root_me}
+      MARIADB_DATABASE: ${MARIADB_DATABASE:-undiscover}
+      MARIADB_USER: ${MARIADB_USER:-undiscover}
+      MARIADB_PASSWORD: ${MARIADB_PASSWORD:-change_me}
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - mariadb_data:/var/lib/mysql
+
+volumes:
+  undiscover_data:
+  mariadb_data:
