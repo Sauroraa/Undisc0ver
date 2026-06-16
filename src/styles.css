@@ -71,7 +71,41 @@ button, input, select, textarea { font: inherit; }
   padding: 0 24px;
 }
 
-.logo { align-items: center; display: inline-flex; gap: 10px; font-weight: 900; }
+.logo {
+  align-items: center;
+  display: inline-flex;
+  gap: 10px;
+  font-weight: 900;
+  letter-spacing: -.02em;
+}
+.brand-mark {
+  align-items: center;
+  background: linear-gradient(180deg, rgba(0,240,138,.16), rgba(0,0,0,.08));
+  border: 1px solid rgba(0,240,138,.22);
+  border-radius: 10px;
+  box-shadow: 0 0 24px rgba(0,240,138,.12);
+  display: inline-flex;
+  height: 34px;
+  justify-content: center;
+  overflow: hidden;
+  padding: 4px;
+  width: 34px;
+}
+.brand-mark img {
+  display: block;
+  height: 100%;
+  object-fit: contain;
+  width: 100%;
+}
+.logo .brand-mark {
+  flex: 0 0 auto;
+  height: 36px;
+  width: 36px;
+}
+.logo strong {
+  color: white;
+  font-size: 16px;
+}
 .mini-icon, .avatar {
   align-items: center;
   background: var(--accent);
@@ -82,6 +116,15 @@ button, input, select, textarea { font: inherit; }
   font-weight: 950;
   height: 24px;
   justify-content: center;
+  width: 34px;
+}
+.mini-icon.brand-mark,
+.avatar.brand-mark {
+  background: #05090b;
+  color: inherit;
+  font-size: 0;
+  height: 34px;
+  padding: 4px;
   width: 34px;
 }
 .nav-links { align-items: center; display: flex; gap: 8px; margin-inline: auto; }
@@ -1039,7 +1082,7 @@ h1, h2, h3, p { margin-top: 0; }
 .preview-sidebar .logo {
   margin-bottom: 12px;
 }
-.preview-sidebar span:not(.mini-icon) {
+.preview-sidebar > span:not(.mini-icon) {
   border-radius: 10px;
   color: var(--muted);
   font-size: 12px;
@@ -2806,11 +2849,20 @@ textarea { min-height: 120px; resize: vertical; }
   top: 42%;
   transform: translate(-50%, -50%);
 }
-.auth-mark span {
+.auth-mark > span:not(.brand-mark) {
   color: white;
   font-size: clamp(86px, 12vw, 160px);
   font-weight: 950;
   line-height: .8;
+}
+.auth-mark .brand-mark {
+  background: radial-gradient(circle at 50% 38%, rgba(0,240,138,.2), rgba(0,0,0,.2) 56%, rgba(0,0,0,.5));
+  border-color: rgba(0,240,138,.26);
+  border-radius: 28px;
+  box-shadow: 0 30px 110px rgba(0,240,138,.16), inset 0 0 0 1px rgba(255,255,255,.06);
+  height: clamp(150px, 18vw, 230px);
+  padding: 22px;
+  width: clamp(150px, 18vw, 230px);
 }
 .auth-mark .crate-mark {
   color: rgba(255,255,255,.16);

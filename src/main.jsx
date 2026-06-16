@@ -1003,10 +1003,23 @@ function Typewriter({ text, speed = 55, cursor = "|" }) {
   );
 }
 
+const BRAND_ASSETS = {
+  mark: "/brand/undiscover-mark.png",
+  icon: "/brand/undiscover-icon.png"
+};
+
+function BrandMark({ className = "", label = "Undiscover" }) {
+  return (
+    <span className={`brand-mark ${className}`.trim()} aria-hidden={label ? undefined : "true"}>
+      <img src={BRAND_ASSETS.mark} alt={label || ""} />
+    </span>
+  );
+}
+
 function Logo({ compact = false }) {
   return (
     <a className="logo" href="#/">
-      <span className="mini-icon">U0</span>
+      <BrandMark label="Undiscover" />
       {!compact && <strong>Undiscover</strong>}
     </a>
   );
@@ -1355,7 +1368,7 @@ function TeamInvitation({ notify }) {
   if (status !== "pending") {
     return (
       <div className={`team-invitation ${status}`}>
-        <span className="avatar">U0</span>
+        <BrandMark className="avatar brand-avatar" label="Undiscover" />
         <div>
           <strong>{status === "accepted" ? "Invitation accepted" : "Invitation declined"}</strong>
           <p>{status === "accepted" ? "You joined the Undiscover Label Team." : "The team invite was dismissed."}</p>
@@ -1999,7 +2012,7 @@ function CurrentDashboardPreview() {
             <span>Manage releases, revenue and audience signals from one clean console.</span>
           </div>
           <article>
-            <span className="mini-icon">U0</span>
+            <BrandMark className="mini-icon" label="Undiscover" />
             <small>Available balance</small>
             <strong>1501 EUR</strong>
             <em>+18% vs last week</em>
@@ -3201,7 +3214,7 @@ function DashboardHero({ user, stats }) {
         </div>
       </div>
       <aside>
-        <span className="mini-icon">U0</span>
+        <BrandMark className="mini-icon" label="Undiscover" />
         <small>Available balance</small>
         <strong>{money(stats.revenue)}</strong>
         <em>+18% vs last week</em>
@@ -3335,7 +3348,7 @@ function AuthPage({ mode, notify }) {
       </section>
       <section className="auth-visual">
         <div className="auth-mark">
-          <span>U0</span>
+          <BrandMark label="Undiscover" />
           <CrateMark />
         </div>
         <blockquote>
