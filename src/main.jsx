@@ -1022,6 +1022,16 @@ const BRAND_ASSETS = {
   icon: "/brand/undiscover-icon.png"
 };
 
+const COMPANY_INFO = {
+  name: "Undiscover",
+  domain: "undisc0ver.com",
+  email: "hello@undisc0ver.com",
+  phone: "087 84 40 00",
+  phoneHref: "tel:+3287844000",
+  companyNumber: "1031.598.463",
+  affiliation: "SauroraaSNC"
+};
+
 function BrandMark({ className = "", label = "Undiscover" }) {
   return (
     <span className={`brand-mark ${className}`.trim()} aria-hidden={label ? undefined : "true"}>
@@ -1507,14 +1517,26 @@ function Footer4Col() {
       links: [
         ["FAQs", "#/faq"],
         ["Support", "#/support"],
-        ["Live chat", "#/support", true]
+        ["Live chat", "#/support", true],
+        ["Getting started", "#/getting-started"],
+        ["Release guide", "#/release-guide"]
+      ]
+    },
+    {
+      title: "Legal",
+      links: [
+        ["Legal notice", "#/legal"],
+        ["Terms of use", "#/terms"],
+        ["Sales terms", "#/sales-terms"],
+        ["Privacy", "#/privacy"],
+        ["Acceptable use", "#/acceptable-use"]
       ]
     }
   ];
   const contactInfo = [
-    { icon: Mail, text: "hello@undisc0ver.com", href: "mailto:hello@undisc0ver.com" },
-    { icon: Phone, text: "+33 1 88 00 06 22", href: "tel:+33188000622" },
-    { icon: MapPin, text: "Paris, FR - Warehouse network", href: "#/" }
+    { icon: Mail, text: COMPANY_INFO.email, href: `mailto:${COMPANY_INFO.email}` },
+    { icon: Phone, text: COMPANY_INFO.phone, href: COMPANY_INFO.phoneHref },
+    { icon: FileText, text: `Company no. ${COMPANY_INFO.companyNumber}`, href: "#/legal" }
   ];
 
   return (
@@ -1524,6 +1546,7 @@ function Footer4Col() {
           <section className="footer-brand">
             <Logo />
             <p>Direct storefront for electronic artists. Upload, share and sell tracks, EPs and dubpacks without a middleman.</p>
+            <small className="footer-company">Affiliated to {COMPANY_INFO.affiliation} · {COMPANY_INFO.domain}</small>
             <NewsletterInput />
             <ul className="footer-socials">
               {socialLinks.map(({ icon: Icon, label, href }) => (
@@ -1563,7 +1586,7 @@ function Footer4Col() {
         </div>
         <div className="footer-bottom">
           <span>All rights reserved.</span>
-          <span>&copy; 2026 Undiscover</span>
+          <span>&copy; 2026 {COMPANY_INFO.name} · Company no. {COMPANY_INFO.companyNumber}</span>
         </div>
       </div>
     </footer>
@@ -1586,22 +1609,24 @@ function NewsletterInput() {
 function LiveSupport({ notify }) {
   const { user } = useAuth();
   const [open, setOpen] = useState(false);
-  const [message, setMessage] = useState("");
+  const [form, setForm] = useState({
+    name: user?.name || "",
+    email: user?.email || "",
+    topic: "Live support",
+    message: ""
+  });
+  const [ticket, setTicket] = useState(null);
+  const update = (key, value) => setForm((current) => ({ ...current, [key]: value }));
   const send = async () => {
-    if (!message.trim()) return;
+    if (!form.message.trim() || !form.email.trim() || !form.name.trim()) return;
     try {
-      await request("/support/tickets", {
+      const data = await request("/support/tickets", {
         method: "POST",
-        body: JSON.stringify({
-          name: user?.name || "Visitor",
-          email: user?.email || "visitor@undisc0ver.com",
-          topic: "Live chat",
-          message
-        })
+        body: JSON.stringify(form)
       });
-      setMessage("");
-      notify("Live support message sent.");
-      setOpen(false);
+      setTicket(data.ticket);
+      setForm((current) => ({ ...current, message: "" }));
+      notify(`Ticket ${data.ticket.id} opened.`);
     } catch (err) {
       notify(err.message);
     }
@@ -1611,9 +1636,21 @@ function LiveSupport({ notify }) {
       {open && (
         <div className="live-support-panel">
           <div><b>Live support</b><button onClick={() => setOpen(false)} aria-label="Close live support"><X size={15} /></button></div>
-          <p>Ask about upload gates, payouts, copyright review or your catalog.</p>
-          <textarea value={message} onChange={(event) => setMessage(event.target.value)} placeholder="Write your message..." />
-          <button className="button accent" onClick={send}><MessageCircle size={16} /> Send</button>
+          <p>Open a real staff ticket for gates, payouts, copyright review or catalog setup.</p>
+          <div className="live-support-fields">
+            <input value={form.name} onChange={(event) => update("name", event.target.value)} placeholder="Name" />
+            <input type="email" value={form.email} onChange={(event) => update("email", event.target.value)} placeholder="Email" />
+            <select value={form.topic} onChange={(event) => update("topic", event.target.value)}>
+              <option>Live support</option>
+              <option>Upload issue</option>
+              <option>Download gate</option>
+              <option>Payouts</option>
+              <option>Copyright review</option>
+            </select>
+          </div>
+          <textarea value={form.message} onChange={(event) => update("message", event.target.value)} placeholder="Write your message..." />
+          {ticket && <span className="ticket-confirmation">Ticket {ticket.id} · {ticket.status}</span>}
+          <button className="button accent" onClick={send}><MessageCircle size={16} /> Send ticket</button>
         </div>
       )}
       <button className="live-support-button" onClick={() => setOpen((value) => !value)}>
@@ -1671,8 +1708,8 @@ function Topbar({ notify }) {
       key: "support",
       label: "Support",
       items: [
-        { href: "#/explore", label: "Getting started", icon: BookOpen },
-        { href: "#/upload", label: "Release guide", icon: FileText },
+        { href: "#/getting-started", label: "Getting started", icon: BookOpen },
+        { href: "#/release-guide", label: "Release guide", icon: FileText },
         { href: "#/support", label: "Live support", icon: LifeBuoy }
       ]
     }
@@ -1827,6 +1864,13 @@ function renderRoute(route, notify, playRelease) {
   if (path === "/settings") return <SettingsPage notify={notify} />;
   if (path === "/support") return <SupportPage notify={notify} />;
   if (path === "/faq") return <FaqPage />;
+  if (path === "/getting-started") return <GettingStartedPage />;
+  if (path === "/release-guide") return <ReleaseGuidePage />;
+  if (path === "/legal") return <LegalNoticePage />;
+  if (path === "/terms") return <TermsOfUsePage />;
+  if (path === "/sales-terms" || path === "/cgv") return <SalesTermsPage />;
+  if (path === "/privacy") return <PrivacyPage />;
+  if (path === "/acceptable-use") return <AcceptableUsePage />;
   if (path === "/careers") return <CareersPage />;
   if (path === "/staff") return <StaffPanel notify={notify} />;
   if (path === "/dashboard") return <Dashboard notify={notify} playRelease={playRelease} section="overview" />;
@@ -1901,13 +1945,194 @@ function SupportPage({ notify }) {
 }
 
 function FaqPage() {
+  const [query, setQuery] = useState("");
+  const [category, setCategory] = useState("All");
   const items = [
-    ["How do I publish a release?", "Create an artist account, open Upload, add metadata, choose pricing and download-gate actions, then publish."],
-    ["Can I disable downloads?", "Yes. Upload supports stream-only releases by turning off downloadable WAV access."],
-    ["How do gates work?", "Fans complete required actions like follow, like, share or comment before the WAV button unlocks."],
-    ["Who handles copyright reports?", "Staff, moderators and admins can review takedowns from the staff panel."]
+    { category: "Uploads", q: "How do I publish a release?", a: "Create an artist account, open Upload, add metadata, choose pricing, choose download-gate actions, attach the real audio file and publish." },
+    { category: "Uploads", q: "Can I publish without downloads?", a: "Yes. Disable downloadable access during upload. The release stays stream-only and no WAV download button is shown." },
+    { category: "Gates", q: "How do download gates work?", a: "The artist selects required actions like Like, Follow, Share or Comment. Fans complete those actions before the download unlocks." },
+    { category: "Gates", q: "Can I require several actions?", a: "Yes. You can combine actions. The release detail page checks each required action before enabling the download." },
+    { category: "Payments", q: "How are paid releases handled?", a: "Paid releases go through checkout and are recorded in the database with revenue, downloads and catalog analytics." },
+    { category: "Copyright", q: "What happens after a copyright report?", a: "Staff, moderators and admins can review reports in the staff panel, move releases to review, block them or remove them from public pages." },
+    { category: "Support", q: "Is live support real?", a: "Yes. The live widget and support page create support tickets in the database. Staff can update ticket status from the staff panel." },
+    { category: "Account", q: "Who can access the staff panel?", a: "Only users with Staff, Moderator or Admin roles. Admins can also change user roles." }
   ];
-  return <main className="page narrow"><PageHeader eyebrow="FAQ" title="Clean answers for the yard." /> <div className="faq-list">{items.map(([q, a]) => <article className="card" key={q}><h2>{q}</h2><p className="muted">{a}</p></article>)}</div></main>;
+  const categories = ["All", ...new Set(items.map((item) => item.category))];
+  const normalized = query.trim().toLowerCase();
+  const filtered = items.filter((item) => {
+    const matchesCategory = category === "All" || item.category === category;
+    const matchesQuery = !normalized || `${item.q} ${item.a} ${item.category}`.toLowerCase().includes(normalized);
+    return matchesCategory && matchesQuery;
+  });
+  return (
+    <main className="page narrow faq-page">
+      <PageHeader eyebrow="FAQ" title="Answers that actually help." text="Search upload, gate, payout, copyright and support questions." />
+      <div className="faq-toolbar">
+        <label className="search compact"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search the FAQ..." /></label>
+        <div className="faq-tabs">
+          {categories.map((item) => <button className={item === category ? "active" : ""} key={item} onClick={() => setCategory(item)}>{item}</button>)}
+        </div>
+      </div>
+      <div className="faq-list">
+        {filtered.map((item) => (
+          <details className="card faq-item" key={item.q} open={filtered.length <= 3}>
+            <summary><span>{item.category}</span><strong>{item.q}</strong><ChevronDown size={17} /></summary>
+            <p className="muted">{item.a}</p>
+          </details>
+        ))}
+        {!filtered.length && <article className="empty"><h2>No answer found</h2><p>Open a support ticket and the team will answer from the staff panel.</p><a className="button accent" href="#/support">Open support</a></article>}
+      </div>
+    </main>
+  );
+}
+
+function GuideChecklist({ items }) {
+  return (
+    <div className="guide-checklist">
+      {items.map((item) => <span key={item}><CircleCheck size={16} /> {item}</span>)}
+    </div>
+  );
+}
+
+function GettingStartedPage() {
+  const steps = [
+    ["1", "Create your account", "Register as an artist, complete your profile, add avatar/banner details and keep your contact email current."],
+    ["2", "Upload the first release", "Add title, genre, artwork, real audio file, price, download availability and optional gate actions."],
+    ["3", "Review before publishing", "Confirm rights ownership, check metadata, scan status and whether the release should be public, review or stream-only."],
+    ["4", "Track the signal", "Use Dashboard and Analytics to follow plays, downloads, revenue, followers and support tickets."]
+  ];
+  return (
+    <main className="page legal-page">
+      <PageHeader eyebrow="Getting started" title="Launch Undiscover cleanly." text="A practical setup path for artists, labels and staff before the first public drop." />
+      <section className="guide-steps">
+        {steps.map(([number, title, text]) => <article className="card guide-step" key={number}><i>{number}</i><h2>{title}</h2><p>{text}</p></article>)}
+      </section>
+      <article className="card legal-card">
+        <h2>Production checklist</h2>
+        <GuideChecklist items={["Use real artist profiles only", "Upload files you own or are licensed to use", "Enable gates only when a download is available", "Check staff tickets daily", "Keep legal pages and company details up to date"]} />
+      </article>
+    </main>
+  );
+}
+
+function ReleaseGuidePage() {
+  const sections = [
+    ["Metadata", "Use an exact title, artist name, genre, track count, duration and price. Avoid misleading names or third-party brands unless licensed."],
+    ["Audio", "Upload the master file you want to stream or deliver. If downloads are disabled, fans can play the release without receiving the file."],
+    ["Download gate", "Choose Like, Follow, Share and/or Comment. Keep the gate short for free downloads and stricter for promo WAV campaigns."],
+    ["Rights", "Publish only content you own or have permission to distribute. Reports can move releases to review or remove them from public pages."],
+    ["After release", "Watch plays, downloads, revenue and support tickets from the dashboard and staff panel."]
+  ];
+  return (
+    <main className="page legal-page">
+      <PageHeader eyebrow="Release guide" title="Ship music without messy edges." text="A clean operating guide for uploads, download gates, payments and copyright checks." />
+      <section className="legal-grid">
+        {sections.map(([title, text]) => <article className="card legal-card" key={title}><h2>{title}</h2><p>{text}</p></article>)}
+      </section>
+      <article className="card legal-card accent-card">
+        <h2>Recommended gate presets</h2>
+        <GuideChecklist items={["Free WAV: Like + Follow", "Promo campaign: Follow + Share + Comment", "Paid release: no gate, checkout only", "Private review: keep moderation status on review"]} />
+      </article>
+    </main>
+  );
+}
+
+function LegalPageShell({ eyebrow, title, text, children }) {
+  return (
+    <main className="page legal-page">
+      <PageHeader eyebrow={eyebrow} title={title} text={text} />
+      <article className="card legal-summary">
+        <Logo />
+        <div>
+          <b>{COMPANY_INFO.name}</b>
+          <span>Company no. {COMPANY_INFO.companyNumber}</span>
+          <span>Affiliated to {COMPANY_INFO.affiliation}</span>
+          <span>{COMPANY_INFO.email} · {COMPANY_INFO.phone}</span>
+        </div>
+      </article>
+      {children}
+      <article className="card legal-note">
+        <ShieldCheck size={18} />
+        <p>These pages are a production-ready operational base. Before public launch, have the final wording validated by a legal professional and complete any mandatory registered-office details required for your exact entity.</p>
+      </article>
+    </main>
+  );
+}
+
+function LegalNoticePage() {
+  return (
+    <LegalPageShell eyebrow="Legal notice" title="Publisher and platform information." text="Company, contact and operational details for Undiscover.">
+      <section className="legal-grid">
+        <article className="card legal-card"><h2>Publisher</h2><p>Undiscover operates the undisc0ver.com platform for electronic artists, labels and listeners. Company number: {COMPANY_INFO.companyNumber}. Affiliated to {COMPANY_INFO.affiliation}.</p></article>
+        <article className="card legal-card"><h2>Contact</h2><p>Email: {COMPANY_INFO.email}. Phone: {COMPANY_INFO.phone}. Support requests should be sent through the support page so a ticket is created and tracked.</p></article>
+        <article className="card legal-card"><h2>Hosting and technical operation</h2><p>The production stack is intended to run on Debian, Docker, Nginx and a persistent database/storage volume. Logs are kept for security, abuse prevention and service reliability.</p></article>
+        <article className="card legal-card"><h2>Complaints</h2><p>For account, payment, copyright or data requests, open a support ticket or email {COMPANY_INFO.email}. Copyright reports may lead to review, blocking or removal.</p></article>
+      </section>
+    </LegalPageShell>
+  );
+}
+
+function TermsOfUsePage() {
+  const terms = [
+    ["Accounts", "Users must provide accurate information, protect credentials and keep contact details updated. Undiscover may suspend accounts used for fraud, abuse, spam, illegal uploads or security attacks."],
+    ["Artist content", "Artists keep ownership of their music, artwork and metadata. By uploading, they grant Undiscover the rights needed to host, stream, promote, sell, gate and deliver that content through the platform."],
+    ["Download gates", "Artists may require Like, Follow, Share or Comment actions before downloads. Gates must not be used for deception, fake engagement or prohibited content."],
+    ["Moderation", "Staff, moderators and admins can review, block, remove or restore content when required for copyright, safety, payment, legal or technical reasons."],
+    ["Availability", "Undiscover aims to keep the service stable, but maintenance, hosting issues, payment provider issues or legal reviews may temporarily affect access."]
+  ];
+  return (
+    <LegalPageShell eyebrow="Terms of use" title="Rules for using Undiscover." text="The platform rules for artists, listeners, staff and account holders.">
+      <section className="legal-stack">{terms.map(([title, text]) => <article className="card legal-card" key={title}><h2>{title}</h2><p>{text}</p></article>)}</section>
+    </LegalPageShell>
+  );
+}
+
+function SalesTermsPage() {
+  const terms = [
+    ["Scope", "These sales terms cover digital releases, downloads, dubpacks, subscriptions, artist tools and related services sold or enabled through Undiscover."],
+    ["Prices and payment", "Prices are displayed before checkout. Paid releases and subscriptions are charged through the available checkout flow. Taxes, invoices and payment references must match the final production payment provider setup."],
+    ["Digital delivery", "Digital content is delivered by account access, streaming, download unlock or direct file access when enabled by the artist."],
+    ["Withdrawal and refunds", "For consumers, distance contracts may include a 14-day withdrawal right. For digital content, this right can be lost once immediate access or download begins after clear consent. Refund requests are reviewed case by case for duplicate payments, failed delivery or legal takedowns."],
+    ["Artist payouts", "Artist balances are calculated from completed paid transactions minus platform fees, refunds, chargebacks, taxes and corrections. Payouts may be delayed during fraud, copyright or identity reviews."],
+    ["Abuse and chargebacks", "Fraud, stolen payment methods, artificial downloads or abusive refund behavior can lead to blocked access and account review."]
+  ];
+  return (
+    <LegalPageShell eyebrow="Sales terms" title="CGV for digital music and artist tools." text="Commercial terms for purchases, downloads, subscriptions and payouts.">
+      <section className="legal-stack">{terms.map(([title, text]) => <article className="card legal-card" key={title}><h2>{title}</h2><p>{text}</p></article>)}</section>
+    </LegalPageShell>
+  );
+}
+
+function PrivacyPage() {
+  const sections = [
+    ["Controller", `${COMPANY_INFO.name}, company no. ${COMPANY_INFO.companyNumber}, affiliated to ${COMPANY_INFO.affiliation}, can be contacted at ${COMPANY_INFO.email}.`],
+    ["Data collected", "Account details, artist profiles, uploaded audio/artwork, release metadata, gate actions, purchases, payment status, support tickets, moderation logs, device/browser logs and security events."],
+    ["Purposes", "Provide accounts, host releases, process downloads and purchases, operate support, prevent abuse, moderate copyright reports, maintain security and comply with legal obligations."],
+    ["Legal bases", "Processing may rely on contract performance, legal obligations, legitimate interests, consent where required and defense of legal claims."],
+    ["Retention", "Operational data is kept as long as needed for the account, contracts, support, legal duties, fraud prevention and accounting. Deleted public content may remain in backups for a limited technical period."],
+    ["Rights", "Users may request access, rectification, deletion, restriction, portability, objection and information about automated processing where applicable."],
+    ["Processors", "Hosting, storage, payment, email, analytics, security and support providers may process data for Undiscover under appropriate safeguards."]
+  ];
+  return (
+    <LegalPageShell eyebrow="Privacy" title="Privacy and data protection." text="How Undiscover handles account, catalog, support and operational data.">
+      <section className="legal-stack">{sections.map(([title, text]) => <article className="card legal-card" key={title}><h2>{title}</h2><p>{text}</p></article>)}</section>
+    </LegalPageShell>
+  );
+}
+
+function AcceptableUsePage() {
+  const rules = [
+    ["Copyright", "Do not upload music, samples, artwork, vocals, packs or metadata unless you own the rights or have a valid license."],
+    ["Illegal content", "Do not use the platform for unlawful, hateful, threatening, harassing, fraudulent, malware-related or privacy-invasive content."],
+    ["Platform integrity", "Do not scrape, attack, overload, bypass gates, manipulate plays/downloads, resell accounts or interfere with other users."],
+    ["Takedowns", "Rights holders can report content through support. Reports should identify the work, the release, the rights holder and the reason for removal."],
+    ["Repeat abuse", "Repeated copyright, payment, spam or security violations can lead to account restrictions, withheld payouts, blocked releases or account termination."]
+  ];
+  return (
+    <LegalPageShell eyebrow="Acceptable use" title="Clean catalog rules." text="The content, copyright and abuse rules that keep the platform usable.">
+      <section className="legal-stack">{rules.map(([title, text]) => <article className="card legal-card" key={title}><h2>{title}</h2><p>{text}</p></article>)}</section>
+    </LegalPageShell>
+  );
 }
 
 function CareersPage() {
