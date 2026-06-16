@@ -2,7 +2,7 @@ FROM node:22-bookworm-slim AS deps
 
 WORKDIR /app
 COPY package*.json ./
-RUN npm ci
+RUN npm install
 
 FROM deps AS build
 
@@ -17,7 +17,7 @@ ENV SQLITE_DB_PATH=/data/undiscover.db
 
 WORKDIR /app
 COPY package*.json ./
-RUN npm ci --omit=dev && npm cache clean --force
+RUN npm install --omit=dev && npm cache clean --force
 
 COPY server ./server
 COPY --from=build /app/dist ./dist
