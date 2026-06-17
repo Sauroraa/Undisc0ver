@@ -4106,7 +4106,7 @@ function AuthPage({ mode, notify }) {
               </button>
             </span>
           </label>
-          {mode === "register" && <label>Genre<select value={form.genre} onChange={(e) => setForm({ ...form, genre: e.target.value })}><option>Tech House</option><option>Techno</option><option>Melodic</option><option>Afro House</option></select></label>}
+          {mode === "register" && <label>Genre<select value={form.genre} onChange={(e) => setForm({ ...form, genre: e.target.value })}><option>Tech House</option><option>Techno</option><option>Melodic</option><option>Afro House</option><option>Drum & Bass</option><option>Hard Techno</option><option>Riddim</option><option>Dubstep</option></select></label>}
           {error && <p className="error">{error}</p>}
           <button className="button auth-submit" type="submit">{isLogin ? "Sign In" : "Sign Up"}</button>
           <p className="auth-toggle">
