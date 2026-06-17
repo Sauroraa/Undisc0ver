@@ -932,6 +932,10 @@ function initials(value = "") {
     .toUpperCase() || "U0";
 }
 
+function isImageAvatar(value = "") {
+  return /^https?:\/\//i.test(value) || String(value).startsWith("/") || /^data:image\//i.test(value);
+}
+
 async function request(path, options = {}) {
   const token = localStorage.getItem("undiscover_token");
   const res = await fetch(`${API}${path}`, {
@@ -1572,31 +1576,32 @@ function TrustedAvatarStack() {
   const { data } = useData("/artists", []);
   const artists = data?.artists || [];
   const visibleArtists = artists.slice(0, 4);
-  const fallbackArtists = [
-    { id: "fallback-u0", name: "Undiscover", avatar: "U0", releases: 0 }
-  ];
-  const shownArtists = visibleArtists.length ? visibleArtists : fallbackArtists;
   const releaseCount = artists.reduce((sum, artist) => sum + Number(artist.releases || 0), 0);
-  const accountLabel = artists.length ? `${artists.length} registered ${artists.length === 1 ? "account" : "accounts"}` : "real accounts";
-  const releaseLabel = releaseCount ? `${shortNumber(releaseCount)} public ${releaseCount === 1 ? "release" : "releases"}` : "real uploads";
+  const userLabel = `${artists.length} utilisateur${artists.length > 1 ? "s" : ""} inscrit${artists.length > 1 ? "s" : ""}`;
+  const releaseLabel = `${shortNumber(releaseCount)} sortie${releaseCount > 1 ? "s" : ""} publique${releaseCount > 1 ? "s" : ""}`;
 
   return (
-    <div className="trusted-stack" aria-label="Production-ready artist platform" data-no-translate>
+    <div className="trusted-stack" aria-label="Utilisateurs inscrits sur Undiscover" data-no-translate>
       <div className="trusted-avatars">
-        {shownArtists.map((artist, idx) => (
+        {visibleArtists.length ? visibleArtists.map((artist, idx) => (
           <a
-            className="avatar hover-avatar"
-            href={artist.id.startsWith("fallback") ? "#/artists" : `#/artist/${artist.id}`}
+            className="trusted-user-link hover-avatar"
+            href={`#/artist/${artist.id}`}
             key={artist.id}
-            style={{ zIndex: shownArtists.length - idx }}
+            style={{ zIndex: visibleArtists.length - idx }}
             aria-label={artist.name}
           >
-            {artist.avatar || initials(artist.name)}
+            <span className="trusted-avatar-index">{idx}</span>
+            <span className="trusted-avatar-face">
+              {isImageAvatar(artist.avatar)
+                ? <img src={artist.avatar} alt="" />
+                : <span>{artist.avatar || initials(artist.name)}</span>}
+            </span>
             <i>{artist.name}</i>
           </a>
-        ))}
+        )) : <span className="trusted-empty-count">0</span>}
       </div>
-      <p><strong>Production mode:</strong> {accountLabel}, {releaseLabel}, real catalog data.</p>
+      <p><strong>{userLabel}</strong> · {releaseLabel}</p>
     </div>
   );
 }

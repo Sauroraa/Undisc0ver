@@ -627,25 +627,51 @@ h1, h2, h3, p { margin-top: 0; }
 .trusted-avatars {
   display: flex;
 }
-.trusted-avatars .avatar {
+.trusted-user-link {
+  align-items: center;
+  background: var(--accent);
   border: 1px solid var(--base);
-  font-size: 10px;
-  height: 24px;
+  border-radius: 999px;
+  color: var(--ink);
+  display: inline-flex;
+  height: 26px;
   margin-left: -6px;
-  width: 24px;
-}
-.trusted-avatars .avatar:first-child {
-  margin-left: 0;
-}
-.trusted-avatars .hover-avatar {
-  cursor: default;
   position: relative;
   transition: transform .3s ease;
 }
-.trusted-avatars .hover-avatar:hover {
+.trusted-user-link:first-child,
+.trusted-empty-count:first-child {
+  margin-left: 0;
+}
+.trusted-user-link:hover {
   transform: translateY(-8px);
 }
-.trusted-avatars .hover-avatar i {
+.trusted-avatar-index {
+  align-items: center;
+  border-right: 1px solid rgba(5,5,9,.18);
+  display: inline-flex;
+  font-size: 10px;
+  font-weight: 950;
+  height: 100%;
+  justify-content: center;
+  min-width: 20px;
+}
+.trusted-avatar-face {
+  align-items: center;
+  display: inline-flex;
+  font-size: 10px;
+  font-weight: 950;
+  height: 24px;
+  justify-content: center;
+  overflow: hidden;
+  width: 24px;
+}
+.trusted-avatar-face img {
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
+}
+.trusted-user-link i {
   background: var(--accent);
   border-radius: 6px;
   color: var(--ink);
@@ -658,6 +684,19 @@ h1, h2, h3, p { margin-top: 0; }
   position: absolute;
   top: -34px;
   white-space: nowrap;
+}
+.trusted-empty-count {
+  align-items: center;
+  background: rgba(255,255,255,.06);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 950;
+  height: 26px;
+  justify-content: center;
+  width: 26px;
 }
 .trusted-stack p {
   color: var(--muted);
