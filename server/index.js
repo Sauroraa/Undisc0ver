@@ -41,6 +41,47 @@ const scanConfig = {
   blockThreshold: Number(process.env.COPYRIGHT_BLOCK_THRESHOLD || 80),
   reviewThreshold: Number(process.env.COPYRIGHT_REVIEW_THRESHOLD || 45)
 };
+const siteUrl = String(process.env.PUBLIC_SITE_URL || "https://undisc0ver.com").replace(/\/$/, "");
+const sitemapRoutes = [
+  { path: "/", priority: "1.0", changefreq: "daily" },
+  { path: "/explore", priority: "0.9", changefreq: "daily" },
+  { path: "/artists", priority: "0.9", changefreq: "daily" },
+  { path: "/charts", priority: "0.8", changefreq: "daily" },
+  { path: "/upload", priority: "0.7", changefreq: "weekly" },
+  { path: "/pricing", priority: "0.8", changefreq: "weekly" },
+  { path: "/support", priority: "0.7", changefreq: "weekly" },
+  { path: "/faq", priority: "0.7", changefreq: "weekly" },
+  { path: "/getting-started", priority: "0.7", changefreq: "monthly" },
+  { path: "/release-guide", priority: "0.8", changefreq: "monthly" },
+  { path: "/legal", priority: "0.4", changefreq: "yearly" },
+  { path: "/terms", priority: "0.4", changefreq: "yearly" },
+  { path: "/sales-terms", priority: "0.4", changefreq: "yearly" },
+  { path: "/privacy", priority: "0.4", changefreq: "yearly" },
+  { path: "/acceptable-use", priority: "0.4", changefreq: "yearly" },
+  { path: "/careers", priority: "0.4", changefreq: "monthly" }
+];
+
+function xmlEscape(value = "") {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
+function sitemapEntry({ path, lastmod, changefreq = "weekly", priority = "0.5" }) {
+  const loc = path === "/" ? siteUrl : `${siteUrl}${path}`;
+  const date = lastmod ? new Date(lastmod).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10);
+  return [
+    "  <url>",
+    `    <loc>${xmlEscape(loc)}</loc>`,
+    `    <lastmod>${date}</lastmod>`,
+    `    <changefreq>${changefreq}</changefreq>`,
+    `    <priority>${priority}</priority>`,
+    "  </url>"
+  ].join("\n");
+}
 
 function scanCopyright({ title = "", artist = "", description = "" }) {
   if (scanConfig.provider === "off") {
@@ -440,6 +481,39 @@ app.post("/api/staff/tickets/:id/status", staffAuth, (req, res) => {
   if (!["open", "pending", "closed"].includes(status)) return res.status(400).json({ error: "Statut invalide." });
   db.prepare("UPDATE support_tickets SET status = ? WHERE id = ?").run(status, req.params.id);
   res.json({ ok: true, status });
+});
+
+app.get("/robots.txt", (_req, res) => {
+  res.type("text/plain").send([
+    "User-agent: *",
+    "Allow: /",
+    "Disallow: /api/",
+    "Disallow: /dashboard",
+    "Disallow: /catalog",
+    "Disallow: /analytics",
+    "Disallow: /payouts",
+    "Disallow: /settings",
+    "Disallow: /staff",
+    "Disallow: /checkout",
+    "",
+    `Sitemap: ${siteUrl}/sitemap.xml`
+  ].join("\n"));
+});
+
+app.get("/sitemap.xml", (_req, res) => {
+  const artists = db.prepare("SELECT id, created_at FROM users ORDER BY created_at DESC").all();
+  const releases = db.prepare("SELECT id, created_at FROM releases WHERE moderation_status = 'published' ORDER BY created_at DESC").all();
+  const entries = [
+    ...sitemapRoutes.map(sitemapEntry),
+    ...artists.map((artist) => sitemapEntry({ path: `/artist/${artist.id}`, lastmod: artist.created_at, changefreq: "weekly", priority: "0.7" })),
+    ...releases.map((release) => sitemapEntry({ path: `/release/${release.id}`, lastmod: release.created_at, changefreq: "weekly", priority: "0.8" }))
+  ];
+  res.type("application/xml").send([
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
+    entries.join("\n"),
+    "</urlset>"
+  ].join("\n"));
 });
 
 app.use((err, _req, res, next) => {

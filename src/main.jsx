@@ -9,6 +9,7 @@ import {
   BarChart3,
   Bell,
   BookOpen,
+  Building2,
   Calendar as CalendarIcon,
   Check,
   ChevronDown,
@@ -50,6 +51,7 @@ import {
   Play,
   RefreshCw,
   Search,
+  Server,
   ShoppingCart,
   Settings,
   ShieldAlert,
@@ -920,6 +922,16 @@ function shortNumber(value) {
   return String(value);
 }
 
+function initials(value = "") {
+  return String(value)
+    .trim()
+    .split(/\s+/)
+    .map((part) => part[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase() || "U0";
+}
+
 async function request(path, options = {}) {
   const token = localStorage.getItem("undiscover_token");
   const res = await fetch(`${API}${path}`, {
@@ -985,12 +997,22 @@ function useAuth() {
   return useContext(AuthContext);
 }
 
+function getCurrentRoute() {
+  if (location.hash) return location.hash.slice(1) || "/";
+  const cleanPath = `${location.pathname}${location.search}`.replace(/\/$/, "") || "/";
+  return cleanPath === "" ? "/" : cleanPath;
+}
+
 function useHashRoute() {
-  const [route, setRoute] = useState(location.hash.slice(1) || "/");
+  const [route, setRoute] = useState(getCurrentRoute);
   useEffect(() => {
-    const onHash = () => setRoute(location.hash.slice(1) || "/");
-    addEventListener("hashchange", onHash);
-    return () => removeEventListener("hashchange", onHash);
+    const onRouteChange = () => setRoute(getCurrentRoute());
+    addEventListener("hashchange", onRouteChange);
+    addEventListener("popstate", onRouteChange);
+    return () => {
+      removeEventListener("hashchange", onRouteChange);
+      removeEventListener("popstate", onRouteChange);
+    };
   }, []);
   return route;
 }
@@ -1029,8 +1051,206 @@ const COMPANY_INFO = {
   phone: "087 84 40 00",
   phoneHref: "tel:+3287844000",
   companyNumber: "1031.598.463",
-  affiliation: "SauroraaSNC"
+  affiliation: "SauroraaSNC",
+  registeredArea: "Belgium"
 };
+
+const SEO_BASE_URL = "https://undisc0ver.com";
+const SEO_DEFAULT = {
+  title: "Undiscover: Storefront direct pour artistes electro, tracks, EPs et dubpacks",
+  description: "Undiscover aide les artistes electro a uploader, partager et vendre tracks, EPs et dubpacks en direct, avec download gates, checkout, analytics et payouts.",
+  image: `${SEO_BASE_URL}/brand/undiscover-icon.png`
+};
+const SEO_PAGES = {
+  "/": SEO_DEFAULT,
+  "/explore": {
+    title: "Explorer les sorties electro, tracks, EPs et dubpacks - Undiscover",
+    description: "Parcours les sorties publiees sur Undiscover : tracks, EPs, dubpacks, free downloads et releases payantes d'artistes independants."
+  },
+  "/artists": {
+    title: "Artistes independants et producteurs electro - Undiscover",
+    description: "Decouvre les artistes inscrits sur Undiscover, leurs catalogues publics, leurs sorties et leurs storefronts directs."
+  },
+  "/charts": {
+    title: "Classements tracks et dubpacks electro - Undiscover",
+    description: "Consulte les sorties qui performent sur Undiscover, classees par plays, ventes, downloads et signal catalogue."
+  },
+  "/upload": {
+    title: "Uploader une sortie musicale - Undiscover",
+    description: "Publie un track, une EP ou un dubpack avec metadata, audio upload, droits, download gates et moderation avant mise en ligne."
+  },
+  "/pricing": {
+    title: "Tarifs Undiscover pour artistes et labels",
+    description: "Compare les plans Undiscover pour publier, vendre et mesurer tes sorties sans marketplace lourde."
+  },
+  "/support": {
+    title: "Support Undiscover - aide upload, paiements et catalogue",
+    description: "Contacte le support Undiscover pour les uploads, download gates, payouts, copyright reviews, checkout et setup catalogue."
+  },
+  "/faq": {
+    title: "FAQ Undiscover - upload, ventes, gates et support",
+    description: "Reponses rapides aux questions sur les releases, les prix, les paiements, les download gates et le support Undiscover."
+  },
+  "/getting-started": {
+    title: "Bien demarrer sur Undiscover",
+    description: "Guide de lancement pour configurer son profil artiste, uploader sa premiere sortie et publier un catalogue propre."
+  },
+  "/release-guide": {
+    title: "Guide de sortie musicale - Undiscover",
+    description: "Guide operationnel pour uploader, verifier les droits, configurer les download gates, vendre et suivre les performances."
+  },
+  "/legal": {
+    title: "Mentions legales - Undiscover",
+    description: "Informations editeur, contact, numero d'entreprise et details operationnels de la plateforme Undiscover."
+  },
+  "/terms": {
+    title: "Conditions d'utilisation - Undiscover",
+    description: "Regles d'utilisation de la plateforme Undiscover pour artistes, auditeurs, equipes et comptes inscrits."
+  },
+  "/sales-terms": {
+    title: "Conditions de vente - Undiscover",
+    description: "Conditions de vente applicables aux sorties digitales, dubpacks, abonnements et services disponibles sur Undiscover."
+  },
+  "/privacy": {
+    title: "Confidentialite et donnees personnelles - Undiscover",
+    description: "Politique de confidentialite Undiscover pour les comptes, catalogues, paiements, support et donnees operationnelles."
+  },
+  "/acceptable-use": {
+    title: "Utilisation acceptable - Undiscover",
+    description: "Regles de securite, contenu, copyright et anti-abus pour utiliser Undiscover proprement."
+  },
+  "/careers": {
+    title: "Carrieres - Undiscover",
+    description: "Roles support, moderation catalogue et operations plateforme pour aider les artistes a publier proprement."
+  }
+};
+const SEO_NAVIGATION = [
+  ["Explorer les sorties", "/explore"],
+  ["Artistes", "/artists"],
+  ["Classements", "/charts"],
+  ["Uploader une sortie", "/upload"],
+  ["Tarifs", "/pricing"],
+  ["Support", "/support"],
+  ["FAQ", "/faq"],
+  ["Guide de sortie", "/release-guide"]
+];
+
+function routePath(route) {
+  const path = String(route || "/").split("?")[0];
+  if (path.startsWith("/release/")) return "/release";
+  if (path.startsWith("/artist/")) return "/artist";
+  return path || "/";
+}
+
+function routeCanonical(route) {
+  const cleanRoute = String(route || "/").split("?")[0];
+  if (cleanRoute === "/") return SEO_BASE_URL;
+  return `${SEO_BASE_URL}${cleanRoute}`;
+}
+
+function setMetaAttribute(selector, attrs) {
+  let element = document.head.querySelector(selector);
+  if (!element) {
+    element = document.createElement("meta");
+    Object.entries(attrs.match || {}).forEach(([key, value]) => element.setAttribute(key, value));
+    document.head.appendChild(element);
+  }
+  Object.entries(attrs.value || {}).forEach(([key, value]) => element.setAttribute(key, value));
+}
+
+function setLinkAttribute(selector, attrs) {
+  let element = document.head.querySelector(selector);
+  if (!element) {
+    element = document.createElement("link");
+    Object.entries(attrs.match || {}).forEach(([key, value]) => element.setAttribute(key, value));
+    document.head.appendChild(element);
+  }
+  Object.entries(attrs.value || {}).forEach(([key, value]) => element.setAttribute(key, value));
+}
+
+function Seo({ route }) {
+  useEffect(() => {
+    const path = routePath(route);
+    const routeSeo = path === "/release"
+      ? { title: "Sortie musicale sur Undiscover", description: "Page publique d'une sortie Undiscover avec audio, metadata, artiste, prix, download gate et checkout." }
+      : path === "/artist"
+        ? { title: "Profil artiste sur Undiscover", description: "Page publique d'un artiste Undiscover avec catalogue, releases, plays, followers et contact booking." }
+        : SEO_PAGES[path] || SEO_DEFAULT;
+    const title = routeSeo.title || SEO_DEFAULT.title;
+    const description = routeSeo.description || SEO_DEFAULT.description;
+    const canonical = routeCanonical(route);
+    const image = routeSeo.image || SEO_DEFAULT.image;
+    const structuredData = [
+      {
+        "@context": "https://schema.org",
+        "@type": "Organization",
+        name: COMPANY_INFO.name,
+        url: SEO_BASE_URL,
+        logo: SEO_DEFAULT.image,
+        email: COMPANY_INFO.email,
+        telephone: COMPANY_INFO.phone,
+        legalName: COMPANY_INFO.affiliation,
+        identifier: COMPANY_INFO.companyNumber
+      },
+      {
+        "@context": "https://schema.org",
+        "@type": "WebSite",
+        name: COMPANY_INFO.name,
+        url: SEO_BASE_URL,
+        description: SEO_DEFAULT.description,
+        potentialAction: {
+          "@type": "SearchAction",
+          target: `${SEO_BASE_URL}/explore?q={search_term_string}`,
+          "query-input": "required name=search_term_string"
+        }
+      },
+      {
+        "@context": "https://schema.org",
+        "@type": "ItemList",
+        name: "Undiscover main pages",
+        itemListElement: SEO_NAVIGATION.map(([name, href], index) => ({
+          "@type": "SiteNavigationElement",
+          position: index + 1,
+          name,
+          url: `${SEO_BASE_URL}${href}`
+        }))
+      },
+      {
+        "@context": "https://schema.org",
+        "@type": "WebPage",
+        name: title,
+        description,
+        url: canonical,
+        isPartOf: { "@type": "WebSite", name: COMPANY_INFO.name, url: SEO_BASE_URL }
+      }
+    ];
+
+    document.title = title;
+    setMetaAttribute('meta[name="description"]', { match: { name: "description" }, value: { content: description } });
+    setMetaAttribute('meta[name="robots"]', { match: { name: "robots" }, value: { content: "index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" } });
+    setMetaAttribute('meta[property="og:type"]', { match: { property: "og:type" }, value: { content: "website" } });
+    setMetaAttribute('meta[property="og:site_name"]', { match: { property: "og:site_name" }, value: { content: COMPANY_INFO.name } });
+    setMetaAttribute('meta[property="og:title"]', { match: { property: "og:title" }, value: { content: title } });
+    setMetaAttribute('meta[property="og:description"]', { match: { property: "og:description" }, value: { content: description } });
+    setMetaAttribute('meta[property="og:url"]', { match: { property: "og:url" }, value: { content: canonical } });
+    setMetaAttribute('meta[property="og:image"]', { match: { property: "og:image" }, value: { content: image } });
+    setMetaAttribute('meta[name="twitter:card"]', { match: { name: "twitter:card" }, value: { content: "summary_large_image" } });
+    setMetaAttribute('meta[name="twitter:title"]', { match: { name: "twitter:title" }, value: { content: title } });
+    setMetaAttribute('meta[name="twitter:description"]', { match: { name: "twitter:description" }, value: { content: description } });
+    setMetaAttribute('meta[name="twitter:image"]', { match: { name: "twitter:image" }, value: { content: image } });
+    setLinkAttribute('link[rel="canonical"]', { match: { rel: "canonical" }, value: { href: canonical } });
+
+    let script = document.head.querySelector("#structured-data");
+    if (!script) {
+      script = document.createElement("script");
+      script.id = "structured-data";
+      script.type = "application/ld+json";
+      document.head.appendChild(script);
+    }
+    script.textContent = JSON.stringify(structuredData);
+  }, [route]);
+  return null;
+}
 
 function BrandMark({ className = "", label = "Undiscover" }) {
   return (
@@ -1189,6 +1409,7 @@ function App() {
   const page = renderRoute(route, notify, playRelease);
   return (
     <div>
+      <Seo route={route} />
       <Topbar notify={notify} />
       {!authLoading && user && showUpgradeBanner && <UpgradeBanner onClose={closeUpgradeBanner} />}
       {page}
@@ -1348,14 +1569,34 @@ function HeroPill({ href, label, announcement = "New" }) {
 }
 
 function TrustedAvatarStack() {
+  const { data } = useData("/artists", []);
+  const artists = data?.artists || [];
+  const visibleArtists = artists.slice(0, 4);
+  const fallbackArtists = [
+    { id: "fallback-u0", name: "Undiscover", avatar: "U0", releases: 0 }
+  ];
+  const shownArtists = visibleArtists.length ? visibleArtists : fallbackArtists;
+  const releaseCount = artists.reduce((sum, artist) => sum + Number(artist.releases || 0), 0);
+  const accountLabel = artists.length ? `${artists.length} registered ${artists.length === 1 ? "account" : "accounts"}` : "real accounts";
+  const releaseLabel = releaseCount ? `${shortNumber(releaseCount)} public ${releaseCount === 1 ? "release" : "releases"}` : "real uploads";
+
   return (
-    <div className="trusted-stack" aria-label="Production-ready artist platform">
+    <div className="trusted-stack" aria-label="Production-ready artist platform" data-no-translate>
       <div className="trusted-avatars">
-        {["DB", "API", "PAY", "MOD"].map((label, idx) => (
-          <span className="avatar" key={label} style={{ zIndex: 4 - idx }}>{label}</span>
+        {shownArtists.map((artist, idx) => (
+          <a
+            className="avatar hover-avatar"
+            href={artist.id.startsWith("fallback") ? "#/artists" : `#/artist/${artist.id}`}
+            key={artist.id}
+            style={{ zIndex: shownArtists.length - idx }}
+            aria-label={artist.name}
+          >
+            {artist.avatar || initials(artist.name)}
+            <i>{artist.name}</i>
+          </a>
         ))}
       </div>
-      <p><strong>Production mode:</strong> real accounts, real uploads, real catalog data.</p>
+      <p><strong>Production mode:</strong> {accountLabel}, {releaseLabel}, real catalog data.</p>
     </div>
   );
 }
@@ -1534,9 +1775,9 @@ function Footer4Col() {
     }
   ];
   const contactInfo = [
-    { icon: Mail, text: COMPANY_INFO.email, href: `mailto:${COMPANY_INFO.email}` },
-    { icon: Phone, text: COMPANY_INFO.phone, href: COMPANY_INFO.phoneHref },
-    { icon: FileText, text: `Company no. ${COMPANY_INFO.companyNumber}`, href: "#/legal" }
+    { icon: Phone, label: "Phone", text: COMPANY_INFO.phone, href: COMPANY_INFO.phoneHref },
+    { icon: FileText, label: "Company no.", text: COMPANY_INFO.companyNumber, href: "#/legal" },
+    { icon: MapPin, label: "Registered in", text: COMPANY_INFO.registeredArea, href: "#/legal" }
   ];
 
   return (
@@ -1556,31 +1797,50 @@ function Footer4Col() {
               ))}
             </ul>
           </section>
-          <div className="footer-columns">
-            {columns.map((column) => (
-              <section key={column.title}>
-                <h2>{column.title}</h2>
-                <ul>
-                  {column.links.map(([text, href, live]) => (
-                    <li key={text}>
-                      <a className={live ? "live-link" : ""} href={href}>
-                        <span>{text}</span>
-                        {live && <i />}
-                      </a>
-                    </li>
-                  ))}
-                </ul>
-              </section>
-            ))}
-            <section>
-              <h2>Contact</h2>
+          <div className="footer-directory">
+            <div className="footer-columns">
+              {columns.map((column) => (
+                <section key={column.title}>
+                  <h2>{column.title}</h2>
+                  <ul>
+                    {column.links.map(([text, href, live]) => (
+                      <li key={text}>
+                        <a className={live ? "live-link" : ""} href={href}>
+                          <span>{text}</span>
+                          {live && <i />}
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              ))}
+            </div>
+            <section className="footer-contact-card" aria-labelledby="footer-contact-title">
+              <div>
+                <span className="eyebrow">Contact</span>
+                <h2 id="footer-contact-title">Support and business</h2>
+              </div>
+              <a className="footer-email-link" href={`mailto:${COMPANY_INFO.email}`}>
+                <Mail size={19} />
+                <span>
+                  <small>Email</small>
+                  <strong>{COMPANY_INFO.email}</strong>
+                </span>
+              </a>
               <ul className="footer-contact">
-                {contactInfo.map(({ icon: Icon, text, href }) => (
-                  <li key={text}>
-                    <a href={href}><Icon size={18} /><span>{text}</span></a>
+                {contactInfo.map(({ icon: Icon, label, text, href }) => (
+                  <li key={label}>
+                    <a href={href}>
+                      <Icon size={17} />
+                      <span>
+                        <small>{label}</small>
+                        <strong>{text}</strong>
+                      </span>
+                    </a>
                   </li>
                 ))}
               </ul>
+              <p>For release help, billing and catalog questions, email the team or open a support ticket.</p>
             </section>
           </div>
         </div>
@@ -1900,6 +2160,18 @@ function SupportPage({ notify }) {
   const [form, setForm] = useState({ name: user?.name || "", email: user?.email || "", topic: "Upload help", message: "" });
   const [sent, setSent] = useState("");
   const [error, setError] = useState("");
+  const topics = [
+    { label: "Upload help", icon: Upload, text: "Audio, metadata, artwork or publishing blocked." },
+    { label: "Download gate", icon: ArrowDownToLine, text: "Like, follow, share or comment gates." },
+    { label: "Payouts", icon: Wallet, text: "Revenue, checkout, paid releases and balances." },
+    { label: "Copyright review", icon: ShieldCheck, text: "Rights checks, reports, takedowns or blocked releases." },
+    { label: "Account access", icon: CircleUserRound, text: "Login, profile, staff roles or workspace access." }
+  ];
+  const supportStats = [
+    ["Tickets", "Routed to staff"],
+    ["Priority", "Copyright & payouts"],
+    ["Contact", COMPANY_INFO.email]
+  ];
   const update = (key, value) => setForm((current) => ({ ...current, [key]: value }));
   const submit = async (event) => {
     event.preventDefault();
@@ -1916,28 +2188,77 @@ function SupportPage({ notify }) {
   };
   return (
     <main className="page support-page">
-      <PageHeader eyebrow="Live support" title="Talk to Undiscover support." text="Open a ticket for upload gates, payouts, copyright reviews or catalog setup." />
+      <section className="support-hero">
+        <div>
+          <span className="eyebrow">Support</span>
+          <h1>Get help without the noise.</h1>
+          <p>Open a tracked ticket for uploads, download gates, payouts, copyright reviews or account access. The team answers from the staff panel.</p>
+        </div>
+        <aside className="support-status-panel" aria-label="Support status">
+          <span><i /> Online</span>
+          <strong>Real tickets, real routing.</strong>
+          <p>Every request is saved, assigned and visible to staff, moderators and admins.</p>
+        </aside>
+      </section>
+
       <div className="support-grid">
-        <form className="form-card support-card" onSubmit={submit}>
-          <div className="form-grid">
-            <label>Name<input value={form.name} onChange={(e) => update("name", e.target.value)} required /></label>
-            <label>Email<input type="email" value={form.email} onChange={(e) => update("email", e.target.value)} required /></label>
+        <form className="support-ticket-form" onSubmit={submit}>
+          <div className="support-form-head">
+            <div>
+              <span className="eyebrow">New ticket</span>
+              <h2>Tell us what is blocked</h2>
+            </div>
+            <span className="support-ticket-badge"><MessageCircle size={15} /> Staff queue</span>
           </div>
-          <label>Topic<select value={form.topic} onChange={(e) => update("topic", e.target.value)}><option>Upload help</option><option>Download gate</option><option>Payouts</option><option>Copyright review</option><option>Account access</option></select></label>
-          <label>Message<textarea value={form.message} onChange={(e) => update("message", e.target.value)} placeholder="Tell us what is blocked..." required /></label>
+
+          <div className="support-topic-grid" role="list" aria-label="Support topics">
+            {topics.map(({ label, icon: Icon, text }) => (
+              <button
+                className={form.topic === label ? "selected" : ""}
+                key={label}
+                type="button"
+                onClick={() => update("topic", label)}
+              >
+                <Icon size={17} />
+                <span><strong>{label}</strong><small>{text}</small></span>
+              </button>
+            ))}
+          </div>
+
+          <div className="form-grid">
+            <label>Name<input value={form.name} onChange={(e) => update("name", e.target.value)} placeholder="Artist or team name" required /></label>
+            <label>Email<input type="email" value={form.email} onChange={(e) => update("email", e.target.value)} placeholder={COMPANY_INFO.email} required /></label>
+          </div>
+          <label>Message<textarea value={form.message} onChange={(e) => update("message", e.target.value)} placeholder="Add the release title, account email, screenshot link or anything staff should check first." required /></label>
           {error && <p className="error">{error}</p>}
           {sent && <p className="success-text">{sent}</p>}
           <button className="button accent" type="submit"><MessageCircle size={16} /> Open support ticket</button>
         </form>
-        <aside className="support-card live-status-card">
-          <span className="badge accent">Live</span>
-          <h2>Support is online</h2>
-          <p>Support tickets are routed to staff, moderators and admins from the staff panel.</p>
-          <div className="profile-mini-list">
-            <span><Upload size={15} /> Upload setup</span>
-            <span><ShieldCheck size={15} /> Copyright reviews</span>
-            <span><Wallet size={15} /> Payouts</span>
-          </div>
+
+        <aside className="support-side">
+          <section className="support-contact-panel">
+            <span className="eyebrow">Direct contact</span>
+            <a href={`mailto:${COMPANY_INFO.email}`}><Mail size={18} /><span>Email<strong>{COMPANY_INFO.email}</strong></span></a>
+            <a href={COMPANY_INFO.phoneHref}><Phone size={18} /><span>Phone<strong>{COMPANY_INFO.phone}</strong></span></a>
+          </section>
+
+          <section className="support-info-panel">
+            <span className="eyebrow">Queue</span>
+            {supportStats.map(([label, value]) => (
+              <div key={label}><span>{label}</span><strong>{value}</strong></div>
+            ))}
+          </section>
+
+          <section className="support-help-panel">
+            <span className="eyebrow">Before sending</span>
+            <ul>
+              <li><CircleCheck size={15} /> Include the release or artist name.</li>
+              <li><CircleCheck size={15} /> Use the email linked to your account.</li>
+              <li><CircleCheck size={15} /> For copyright, add rights owner details.</li>
+            </ul>
+            <a className="button ghost" href="#/faq"><HelpCircle size={16} /> Browse FAQ</a>
+            <a className="button ghost" href="#/release-guide"><FileText size={16} /> Release guide</a>
+          </section>
         </aside>
       </div>
     </main>
@@ -1986,9 +2307,9 @@ function FaqPage() {
   );
 }
 
-function GuideChecklist({ items }) {
+function GuideChecklist({ items, compact = false }) {
   return (
-    <div className="guide-checklist">
+    <div className={compact ? "guide-checklist compact" : "guide-checklist"}>
       {items.map((item) => <span key={item}><CircleCheck size={16} /> {item}</span>)}
     </div>
   );
@@ -1996,21 +2317,81 @@ function GuideChecklist({ items }) {
 
 function GettingStartedPage() {
   const steps = [
-    ["1", "Create your account", "Register as an artist, complete your profile, add avatar/banner details and keep your contact email current."],
-    ["2", "Upload the first release", "Add title, genre, artwork, real audio file, price, download availability and optional gate actions."],
-    ["3", "Review before publishing", "Confirm rights ownership, check metadata, scan status and whether the release should be public, review or stream-only."],
-    ["4", "Track the signal", "Use Dashboard and Analytics to follow plays, downloads, revenue, followers and support tickets."]
+    { number: "01", icon: CircleUserRound, title: "Create the artist base", text: "Register, complete the artist profile, keep the public name clean and make sure the account email is current.", href: "#/register", action: "Create account" },
+    { number: "02", icon: Upload, title: "Prepare the first drop", text: "Add title, genre, track count, duration, pricing, audio file and download availability before publishing.", href: "#/upload", action: "Upload release" },
+    { number: "03", icon: ShieldCheck, title: "Clear rights and gates", text: "Confirm ownership, choose stream-only or downloadable access, and keep gate actions short enough for listeners to finish.", href: "#/release-guide", action: "Read guide" },
+    { number: "04", icon: BarChart3, title: "Track the signal", text: "Use dashboard and analytics to monitor plays, downloads, sales, followers, support tickets and catalog health.", href: "#/dashboard", action: "Open dashboard" }
   ];
+  const launchCards = [
+    { icon: FileText, title: "Metadata", text: "Use exact release names, artist credits, genre and track counts. Avoid temporary placeholders." },
+    { icon: ArrowDownToLine, title: "Downloads", text: "Enable gates only when a downloadable file is meant to be delivered." },
+    { icon: Wallet, title: "Checkout", text: "Check pricing before sharing paid drops, especially dubpacks and subscriptions." }
+  ];
+  const checklist = [
+    "Use real artist profiles only",
+    "Upload audio you own or are licensed to distribute",
+    "Review title, genre, duration and price before sharing",
+    "Keep support tickets and copyright reviews visible to staff",
+    "Submit the sitemap in Search Console after deployment"
+  ];
+
   return (
-    <main className="page legal-page">
-      <PageHeader eyebrow="Getting started" title="Launch Undiscover cleanly." text="A practical setup path for artists, labels and staff before the first public drop." />
-      <section className="guide-steps">
-        {steps.map(([number, title, text]) => <article className="card guide-step" key={number}><i>{number}</i><h2>{title}</h2><p>{text}</p></article>)}
+    <main className="page getting-started-page">
+      <section className="getting-started-hero">
+        <div>
+          <span className="eyebrow">Getting started</span>
+          <h1>Launch Undiscover cleanly.</h1>
+          <p>A practical setup path for artists, labels and staff before the first public drop.</p>
+          <div className="button-row">
+            <a className="button accent" href="#/upload"><Upload size={16} /> Upload release</a>
+            <a className="button ghost" href="#/release-guide"><BookOpen size={16} /> Release guide</a>
+          </div>
+        </div>
+        <aside className="getting-started-summary">
+          <span>Setup path</span>
+          <strong>4 steps</strong>
+          <p>Account, release, rights and analytics in one clean launch flow.</p>
+        </aside>
       </section>
-      <article className="card legal-card">
-        <h2>Production checklist</h2>
-        <GuideChecklist items={["Use real artist profiles only", "Upload files you own or are licensed to use", "Enable gates only when a download is available", "Check staff tickets daily", "Keep legal pages and company details up to date"]} />
-      </article>
+
+      <section className="getting-started-layout">
+        <div className="getting-started-steps">
+          {steps.map(({ number, icon: Icon, title, text, href, action }) => (
+            <article className="getting-started-step" key={number}>
+              <span className="step-number">{number}</span>
+              <Icon size={20} />
+              <div>
+                <h2>{title}</h2>
+                <p>{text}</p>
+              </div>
+              <a href={href}>{action} <ArrowRight size={15} /></a>
+            </article>
+          ))}
+        </div>
+
+        <aside className="getting-started-sidebar">
+          <section className="launch-checklist-card">
+            <span className="eyebrow">Production checklist</span>
+            <h2>Before the first public link</h2>
+            <GuideChecklist items={checklist} compact />
+          </section>
+          <section className="launch-help-card">
+            <span className="eyebrow">Need help?</span>
+            <p>Open a support ticket if upload, payout, gates or copyright review blocks the launch.</p>
+            <a className="button ghost" href="#/support"><MessageCircle size={16} /> Contact support</a>
+          </section>
+        </aside>
+      </section>
+
+      <section className="launch-card-grid">
+        {launchCards.map(({ icon: Icon, title, text }) => (
+          <article key={title}>
+            <Icon size={19} />
+            <h2>{title}</h2>
+            <p>{text}</p>
+          </article>
+        ))}
+      </section>
     </main>
   );
 }
@@ -2041,17 +2422,20 @@ function LegalPageShell({ eyebrow, title, text, children }) {
   return (
     <main className="page legal-page">
       <PageHeader eyebrow={eyebrow} title={title} text={text} />
-      <article className="card legal-summary">
-        <Logo />
-        <div>
-          <b>{COMPANY_INFO.name}</b>
-          <span>Company no. {COMPANY_INFO.companyNumber}</span>
-          <span>Affiliated to {COMPANY_INFO.affiliation}</span>
-          <span>{COMPANY_INFO.email} · {COMPANY_INFO.phone}</span>
+      <article className="legal-identity-card">
+        <div className="legal-brand-row">
+          <Logo />
+          <span className="legal-status"><ShieldCheck size={15} /> Operational legal base</span>
+        </div>
+        <div className="legal-identity-grid">
+          <span><small>Platform</small><strong>{COMPANY_INFO.name}</strong></span>
+          <span><small>Company no.</small><strong>{COMPANY_INFO.companyNumber}</strong></span>
+          <span><small>Affiliation</small><strong>{COMPANY_INFO.affiliation}</strong></span>
+          <span><small>Contact</small><strong>{COMPANY_INFO.email}</strong></span>
         </div>
       </article>
       {children}
-      <article className="card legal-note">
+      <article className="legal-note">
         <ShieldCheck size={18} />
         <p>These pages are a production-ready operational base. Before public launch, have the final wording validated by a legal professional and complete any mandatory registered-office details required for your exact entity.</p>
       </article>
@@ -2060,13 +2444,70 @@ function LegalPageShell({ eyebrow, title, text, children }) {
 }
 
 function LegalNoticePage() {
+  const legalSections = [
+    {
+      icon: Building2,
+      title: "Publisher",
+      details: [
+        ["Operator", COMPANY_INFO.name],
+        ["Platform", COMPANY_INFO.domain],
+        ["Company no.", COMPANY_INFO.companyNumber],
+        ["Affiliation", COMPANY_INFO.affiliation]
+      ],
+      text: "Undiscover operates a storefront platform for electronic artists, labels and listeners."
+    },
+    {
+      icon: Mail,
+      title: "Contact",
+      details: [
+        ["Email", COMPANY_INFO.email],
+        ["Phone", COMPANY_INFO.phone],
+        ["Support", "Tracked tickets through the support page"]
+      ],
+      text: "Support requests should be sent through the support page so each request is created, assigned and tracked."
+    },
+    {
+      icon: Server,
+      title: "Hosting and technical operation",
+      details: [
+        ["Runtime", "Debian, Docker, Nginx"],
+        ["Storage", "Persistent database and upload volume"],
+        ["Logs", "Security, abuse prevention and reliability"]
+      ],
+      text: "The production stack is designed for a persistent server deployment with controlled logs and operational monitoring."
+    },
+    {
+      icon: LifeBuoy,
+      title: "Complaints",
+      details: [
+        ["Account", "Open a support ticket"],
+        ["Payment", `Email ${COMPANY_INFO.email}`],
+        ["Copyright", "Reports may lead to review, blocking or removal"]
+      ],
+      text: "For account, payment, copyright or data requests, contact support with the relevant release, account or rights-owner details."
+    }
+  ];
+
   return (
     <LegalPageShell eyebrow="Legal notice" title="Publisher and platform information." text="Company, contact and operational details for Undiscover.">
-      <section className="legal-grid">
-        <article className="card legal-card"><h2>Publisher</h2><p>Undiscover operates the undisc0ver.com platform for electronic artists, labels and listeners. Company number: {COMPANY_INFO.companyNumber}. Affiliated to {COMPANY_INFO.affiliation}.</p></article>
-        <article className="card legal-card"><h2>Contact</h2><p>Email: {COMPANY_INFO.email}. Phone: {COMPANY_INFO.phone}. Support requests should be sent through the support page so a ticket is created and tracked.</p></article>
-        <article className="card legal-card"><h2>Hosting and technical operation</h2><p>The production stack is intended to run on Debian, Docker, Nginx and a persistent database/storage volume. Logs are kept for security, abuse prevention and service reliability.</p></article>
-        <article className="card legal-card"><h2>Complaints</h2><p>For account, payment, copyright or data requests, open a support ticket or email {COMPANY_INFO.email}. Copyright reports may lead to review, blocking or removal.</p></article>
+      <section className="legal-notice-grid">
+        {legalSections.map(({ icon: Icon, title, details, text }) => (
+          <article className="legal-info-card" key={title}>
+            <div className="legal-info-head">
+              <Icon size={19} />
+              <h2>{title}</h2>
+            </div>
+            <p>{text}</p>
+            <dl>
+              {details.map(([label, value]) => (
+                <div key={label}>
+                  <dt>{label}</dt>
+                  <dd>{value}</dd>
+                </div>
+              ))}
+            </dl>
+          </article>
+        ))}
       </section>
     </LegalPageShell>
   );
@@ -2683,13 +3124,25 @@ function Testimonials() {
 }
 
 function LogoSlider() {
-  const labels = ["KALDEN BESS", "NALA", "AMIA MOSSER", "TERMINAL M", "TRONIC", "RESPEKT", "U0 PRO", "FREE DL"];
+  const { data: releasesData } = useData("/releases", []);
+  const { data: artistsData } = useData("/artists", []);
+  const releases = releasesData?.releases || [];
+  const artists = artistsData?.artists || [];
+  const releaseLabels = releases
+    .slice(0, 10)
+    .map((release) => `${release.title} - ${release.artist}`);
+  const artistLabels = artists
+    .slice(0, 10)
+    .map((artist) => artist.name);
+  const labels = releaseLabels.length ? releaseLabels : artistLabels.length ? artistLabels : ["Undiscover"];
+  const marqueeLabels = labels.length > 1 ? [...labels, ...labels] : [...labels, ...labels, ...labels, ...labels];
+
   return (
     <section className="logo-slider-section">
       <p>Powering direct drops for artists</p>
       <div className="logo-slider" aria-label="Undiscover artist and label network">
-        <div className="logo-track">
-          {[...labels, ...labels].map((label, index) => <span key={`${label}-${index}`}>{label}</span>)}
+        <div className="logo-track" data-no-translate>
+          {marqueeLabels.map((label, index) => <span key={`${label}-${index}`}>{label}</span>)}
         </div>
       </div>
     </section>
