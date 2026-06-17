@@ -965,6 +965,20 @@ async function uploadAudio(file) {
   return data.file;
 }
 
+async function uploadImage(file) {
+  const token = localStorage.getItem("undiscover_token");
+  const formData = new FormData();
+  formData.append("image", file);
+  const res = await fetch(`${API}/uploads/image`, {
+    method: "POST",
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: formData
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || "Erreur upload image");
+  return data.file;
+}
+
 function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -3211,7 +3225,8 @@ function ArtistProfile({ id, notify, playRelease }) {
   const topRelease = [...releases].sort((a, b) => Number(b.plays || 0) - Number(a.plays || 0))[0];
   const freeCount = releases.filter((release) => release.free).length;
   const paidCount = Math.max(releases.length - freeCount, 0);
-  const profileUrl = `releaseyrd.com/${slug}`;
+  const socialLinks = (() => { try { return JSON.parse(artist.social_links || "{}"); } catch { return {}; } })();
+  const profileUrl = `https://undisc0ver.com/artist/${artist.id}`;
   const copyProfile = async () => {
     await navigator.clipboard?.writeText(profileUrl);
     notify("Profile link copied.");
@@ -3220,8 +3235,7 @@ function ArtistProfile({ id, notify, playRelease }) {
     <main className="page artist-profile-page">
       <section className={`artist-profile-hero ${artist.pro ? "is-pro" : ""}`}>
         <div className={`artist-profile-banner tone-${artist.id.includes("nala") ? "blue" : artist.id.includes("mosser") ? "red" : "green"}`}>
-          <div className="profile-banner-noise" />
-          <CrateMark className="cover-crate" />
+          {artist.banner_url ? <img className="artist-banner-image" src={artist.banner_url} alt="" /> : <><div className="profile-banner-noise" /><CrateMark className="cover-crate" /></>}
           <div className="profile-banner-copy">
             <span>Public artist profile</span>
             <strong>{profileUrl}</strong>
@@ -3232,7 +3246,7 @@ function ArtistProfile({ id, notify, playRelease }) {
         </div>
         <div className="artist-profile-panel">
           <div className="artist-identity">
-            <span className="artist-avatar-xl">{artist.avatar}</span>
+            <span className="artist-avatar-xl">{artist.logo_url || artist.avatar_url ? <img src={artist.logo_url || artist.avatar_url} alt="" /> : artist.avatar}</span>
             <div>
               <div className="profile-badges">
                 <span className="badge soft">{artist.genre}</span>
@@ -3250,6 +3264,9 @@ function ArtistProfile({ id, notify, playRelease }) {
                 <FollowButton artistId={artist.id} notify={notify} />
                 <button className="button ghost" onClick={() => notify("Message thread opened.")}><MessageCircle size={16} /> Message</button>
                 <button className="button ghost" onClick={copyProfile}><Copy size={16} /> Copy link</button>
+              </div>
+              <div className="artist-social-links">
+                {Object.entries(socialLinks).filter(([, href]) => href).map(([label, href]) => <a key={label} href={href} target="_blank" rel="noreferrer">{label}<ExternalLink size={13} /></a>)}
               </div>
             </div>
           </div>
@@ -3337,13 +3354,22 @@ function ReleaseDetail({ id, notify, playRelease }) {
   if (error) return <ErrorPage message={error} />;
   const release = data.release;
   return (
-    <main className="page detail-layout">
-      <PackArtwork release={release} large />
-      <section>
-        <p className="label">{release.kind} - {release.genre}</p>
-        <h1>{release.title}</h1>
-        <p className="muted">By <a href={`#/artist/${release.user_id}`}>{release.artist}</a> - {release.tracks} track(s) - {release.duration}</p>
-        <p>{release.description}</p>
+    <main className="page release-detail-page">
+      <section className="release-detail-hero">
+        <PackArtwork release={release} large />
+        <div className="release-detail-copy">
+          <p className="label">{release.kind} - {release.genre} - {release.visibility || "public"}</p>
+          <h1>{release.title}</h1>
+          <p className="muted">By <a href={`#/artist/${release.user_id}`}>{release.artist}</a> - {release.tracks} track(s) - {release.duration}</p>
+          <p>{release.description}</p>
+          <div className="release-share-line">
+            <span>https://undisc0ver.com/release/{release.id}</span>
+            <button className="button ghost" type="button" onClick={() => navigator.clipboard?.writeText(`https://undisc0ver.com/release/${release.id}`)}><Copy size={15} /> Copy link</button>
+          </div>
+        </div>
+      </section>
+      <section className="release-detail-body">
+        <div>
         <div className="button-row">
           <button className="button accent" type="button" onClick={() => playRelease(release)}><Play size={16} fill="currentColor" /> Play</button>
           <LikeButton release={release} notify={notify} />
@@ -3353,18 +3379,53 @@ function ReleaseDetail({ id, notify, playRelease }) {
         <div className="stats card-stats">
           <b>{shortNumber(release.plays)}<span>plays</span></b>
           <b>{shortNumber(release.downloads)}<span>downloads</span></b>
+          <b>{shortNumber(release.sales || 0)}<span>sales</span></b>
           <b>{release.likes}<span>likes</span></b>
         </div>
         {reportOpen && <TakedownReportForm release={release} notify={notify} />}
+        </div>
+        <ReleaseComments release={release} initialComments={data.comments || []} notify={notify} />
       </section>
     </main>
   );
 }
 
+function ReleaseComments({ release, initialComments, notify }) {
+  const { user } = useAuth();
+  const [comments, setComments] = useState(initialComments);
+  const [body, setBody] = useState("");
+  const submit = async (event) => {
+    event.preventDefault();
+    if (!user) return location.hash = "#/login";
+    await request(`/releases/${release.id}/comments`, { method: "POST", body: JSON.stringify({ body }) });
+    setComments([{ id: `local-${Date.now()}`, body, name: user.name, avatar: user.avatar, avatar_url: user.avatar_url, created_at: new Date().toISOString() }, ...comments]);
+    setBody("");
+    notify("Comment added.");
+  };
+  return (
+    <aside className="release-comments-card">
+      <h2>Comments</h2>
+      <form onSubmit={submit}>
+        <textarea value={body} onChange={(e) => setBody(e.target.value)} placeholder="Write a comment..." />
+        <button className="button accent" type="submit"><MessageCircle size={16} /> Comment</button>
+      </form>
+      <div className="release-comment-list">
+        {comments.length ? comments.map((comment) => (
+          <article key={comment.id}>
+            <span className="avatar">{comment.avatar || initials(comment.name)}</span>
+            <div><strong>{comment.name}</strong><p>{comment.body}</p></div>
+          </article>
+        )) : <p className="muted">No comments yet.</p>}
+      </div>
+    </aside>
+  );
+}
+
 function UploadPage({ notify }) {
   const { user } = useAuth();
-  const [form, setForm] = useState({ title: "", kind: "Track", genre: "Tech House", tracks: 1, duration: "06:00", price: 8, free: false, download_enabled: true, gate_actions: [], gate: "No gate", description: "", rights_confirmed: false, rights_owner: "" });
+  const [form, setForm] = useState({ title: "", kind: "Track", genre: "Tech House", tracks: 1, duration: "06:00", price: 8, free: false, download_enabled: true, gate_actions: [], gate: "No gate", description: "", rights_confirmed: false, rights_owner: "", visibility: "public" });
   const [file, setFile] = useState(null);
+  const [coverFile, setCoverFile] = useState(null);
   const [error, setError] = useState("");
   const { data: copyrightConfig } = useData("/copyright/config", []);
   if (!user) return <AuthRequired />;
@@ -3385,12 +3446,14 @@ function UploadPage({ notify }) {
     try {
       if (!file) throw new Error("Ajoute un fichier audio avant publication.");
       const uploadedAudio = await uploadAudio(file);
+      const uploadedCover = coverFile ? await uploadImage(coverFile) : null;
       const payload = {
         ...form,
         audio_url: uploadedAudio.url,
         audio_file_name: uploadedAudio.name,
         audio_mime: uploadedAudio.mime,
         audio_size: uploadedAudio.size,
+        cover_url: uploadedCover?.url || "",
         gate_actions: form.download_enabled ? form.gate_actions : [],
         gate: form.download_enabled ? form.gate : "Downloads disabled"
       };
@@ -3411,13 +3474,15 @@ function UploadPage({ notify }) {
       <PageHeader eyebrow="New release" title="Upload a track, EP or dubpack." text="Metadata is saved to the production database and appears after rights checks pass." />
       <form className="form-card" onSubmit={submit}>
         <FileUploadPanel file={file} setFile={setFile} notify={notify} />
+        <ImageUploadPanel file={coverFile} setFile={setCoverFile} title="Cover artwork" text="Upload a square JPG, PNG or WebP cover for this release." />
         <label>Track title<input value={form.title} onChange={(e) => update("title", e.target.value)} placeholder="e.g. Your release title" required /></label>
         <div className="form-grid">
           <label>Type<select value={form.kind} onChange={(e) => update("kind", e.target.value)}><option>Track</option><option>EP</option><option>Dubpack</option></select></label>
-          <label>Genre<select value={form.genre} onChange={(e) => update("genre", e.target.value)}><option>Tech House</option><option>Techno</option><option>Melodic</option><option>Afro House</option><option>Drum & Bass</option></select></label>
+          <label>Genre<select value={form.genre} onChange={(e) => update("genre", e.target.value)}><option>Tech House</option><option>Techno</option><option>Melodic</option><option>Afro House</option><option>Drum & Bass</option><option>Hard Techno</option><option>Riddim</option><option>Dubstep</option></select></label>
           <label>Tracks<input type="number" min="1" value={form.tracks} onChange={(e) => update("tracks", e.target.value)} /></label>
           <label>Duration<input value={form.duration} onChange={(e) => update("duration", e.target.value)} /></label>
         </div>
+        <label>Visibility<select value={form.visibility} onChange={(e) => update("visibility", e.target.value)}><option value="public">Public</option><option value="unlisted">Unlisted</option><option value="private">Private</option></select></label>
         <div className="segmented">
           <button type="button" className={form.free ? "active" : ""} onClick={() => update("free", true)}>Free</button>
           <button type="button" className={!form.free ? "active" : ""} onClick={() => update("free", false)}>Fixed price</button>
@@ -3568,6 +3633,23 @@ function FileUploadPanel({ file, setFile, notify }) {
           <button type="button" onClick={() => notify("Choose an audio file to continue.")} aria-label="No file selected"><X size={16} /></button>
         </div>
       )}
+    </section>
+  );
+}
+
+function ImageUploadPanel({ file, setFile, title = "Image upload", text = "Upload a JPG, PNG or WebP image." }) {
+  const fileInputId = useId();
+  const preview = file ? URL.createObjectURL(file) : "";
+  useEffect(() => () => { if (preview) URL.revokeObjectURL(preview); }, [preview]);
+  return (
+    <section className="file-upload-card image-upload-card">
+      <h3>{title}</h3>
+      <label className="file-dropzone image-dropzone" htmlFor={fileInputId}>
+        {preview ? <img src={preview} alt="" /> : <Upload size={24} />}
+        <span>{file ? file.name : text}</span>
+        <input id={fileInputId} type="file" accept="image/png,image/jpeg,image/webp,image/gif" onChange={(event) => setFile(event.target.files?.[0] || null)} />
+      </label>
+      {file && <button className="button ghost" type="button" onClick={() => setFile(null)}><Trash size={16} /> Remove image</button>}
     </section>
   );
 }
@@ -3767,16 +3849,48 @@ function PaymentForm({ notify, releaseId }) {
 }
 
 function SettingsPage({ notify }) {
-  const { user } = useAuth();
+  const auth = useAuth();
+  const { user } = auth;
   const plans = [
     { name: "Creator", price: "0 EUR", features: ["Public artist profile", "3 active releases", "Community support"] },
     { name: "Pro", price: "7.99 EUR", recommended: true, features: ["Unlimited releases", "Advanced analytics", "Fast payout queue"] },
     { name: "Label", price: "29 EUR", features: ["Multiple artists", "Client portal", "Priority support"] }
   ];
   const [selected, setSelected] = useState("Pro");
+  const socialLinks = (() => { try { return JSON.parse(user?.social_links || "{}"); } catch { return {}; } })();
+  const [profile, setProfile] = useState(() => ({
+    name: user?.name || "",
+    email: user?.email || "",
+    location: user?.location || "",
+    genre: user?.genre || "Tech House",
+    bio: user?.bio || "",
+    avatar_url: user?.avatar_url || "",
+    logo_url: user?.logo_url || "",
+    banner_url: user?.banner_url || "",
+    workspace_visibility: user?.workspace_visibility || "public",
+    instagram: socialLinks.instagram || "",
+    soundcloud: socialLinks.soundcloud || "",
+    spotify: socialLinks.spotify || "",
+    website: socialLinks.website || ""
+  }));
+  const [logoFile, setLogoFile] = useState(null);
+  const [bannerFile, setBannerFile] = useState(null);
   if (!user) return <AuthRequired />;
-  const submit = (event) => {
+  const updateProfile = (key, value) => setProfile((current) => ({ ...current, [key]: value }));
+  const submit = async (event) => {
     event.preventDefault();
+    const logo = logoFile ? await uploadImage(logoFile) : null;
+    const banner = bannerFile ? await uploadImage(bannerFile) : null;
+    await request("/me/settings", {
+      method: "PATCH",
+      body: JSON.stringify({
+        ...profile,
+        logo_url: logo?.url || profile.logo_url,
+        avatar_url: logo?.url || profile.avatar_url,
+        banner_url: banner?.url || profile.banner_url
+      })
+    });
+    await auth.loginWithToken(localStorage.getItem("undiscover_token"));
     notify("Settings saved.");
   };
   return (
@@ -3786,18 +3900,31 @@ function SettingsPage({ notify }) {
         <section className="settings-block">
           <div><h2>Personal information</h2><p>Update the public-facing artist identity used across Undiscover.</p></div>
           <div className="settings-fields">
-            <label>Artist name<input defaultValue={user.name} /></label>
-            <label>Email<input type="email" defaultValue={user.email} /></label>
-            <label>Location<input defaultValue={user.location || "Paris, FR"} /></label>
+            <label>Artist name<input value={profile.name} onChange={(e) => updateProfile("name", e.target.value)} /></label>
+            <label>Email<input type="email" value={profile.email} onChange={(e) => updateProfile("email", e.target.value)} /></label>
+            <label>Location<input value={profile.location} onChange={(e) => updateProfile("location", e.target.value)} /></label>
+            <label>Genre<select value={profile.genre} onChange={(e) => updateProfile("genre", e.target.value)}><option>Tech House</option><option>Techno</option><option>Melodic</option><option>Afro House</option><option>Drum & Bass</option><option>Hard Techno</option><option>Riddim</option><option>Dubstep</option></select></label>
             <label>Role<input defaultValue="Artist owner" disabled /></label>
+          </div>
+        </section>
+        <section className="settings-block">
+          <div><h2>Brand assets</h2><p>Set your public logo/profile picture and banner.</p></div>
+          <div className="settings-fields">
+            <ImageUploadPanel file={logoFile} setFile={setLogoFile} title="Logo / profile picture" text="Upload your artist logo or profile picture." />
+            <ImageUploadPanel file={bannerFile} setFile={setBannerFile} title="Banner" text="Upload a wide banner for your artist page." />
+            <label>Logo URL<input value={profile.logo_url} onChange={(e) => updateProfile("logo_url", e.target.value)} placeholder="https://..." /></label>
+            <label>Banner URL<input value={profile.banner_url} onChange={(e) => updateProfile("banner_url", e.target.value)} placeholder="https://..." /></label>
           </div>
         </section>
         <section className="settings-block">
           <div><h2>Workspace settings</h2><p>Control how your catalog appears to listeners, DJs and promoters.</p></div>
           <div className="settings-fields">
-            <label>Workspace name<input defaultValue={`${user.name} Yard`} /></label>
-            <label>Visibility<select defaultValue="public"><option value="public">Public</option><option value="private">Private</option></select></label>
-            <label className="full">Workspace description<textarea defaultValue={user.bio || "Direct release catalog for club music."} /></label>
+            <label>Visibility<select value={profile.workspace_visibility} onChange={(e) => updateProfile("workspace_visibility", e.target.value)}><option value="public">Public</option><option value="private">Private</option></select></label>
+            <label className="full">Bio<textarea value={profile.bio} onChange={(e) => updateProfile("bio", e.target.value)} /></label>
+            <label>Instagram<input value={profile.instagram} onChange={(e) => updateProfile("instagram", e.target.value)} placeholder="https://instagram.com/..." /></label>
+            <label>SoundCloud<input value={profile.soundcloud} onChange={(e) => updateProfile("soundcloud", e.target.value)} placeholder="https://soundcloud.com/..." /></label>
+            <label>Spotify<input value={profile.spotify} onChange={(e) => updateProfile("spotify", e.target.value)} placeholder="https://open.spotify.com/..." /></label>
+            <label>Website<input value={profile.website} onChange={(e) => updateProfile("website", e.target.value)} placeholder="https://..." /></label>
           </div>
         </section>
         <section className="settings-block">
@@ -3875,7 +4002,8 @@ function DashboardSidebar({ section }) {
 }
 
 function LinkShortenerWidget({ notify }) {
-  const [longLink, setLongLink] = useState("https://releaseyrd.com/kalden/midnight-protocol?utm=club");
+  const siteOrigin = "https://undisc0ver.com";
+  const [longLink, setLongLink] = useState(`${siteOrigin}/release/your-release-id?utm=club`);
   const [shortLink, setShortLink] = useState("");
   const [loading, setLoading] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -3887,14 +4015,18 @@ function LinkShortenerWidget({ notify }) {
     try {
       new URL(longLink);
     } catch {
-      return setError("URL invalide. Exemple: https://releaseyrd.com/track");
+      return setError("URL invalide. Exemple: https://undisc0ver.com/release/id");
     }
     setLoading(true);
-    await new Promise((resolve) => setTimeout(resolve, 650));
-    const code = Math.random().toString(36).slice(2, 8);
-    setShortLink(`https://ry.rd/${code}`);
-    setLoading(false);
-    notify("Short link generated.");
+    try {
+      const data = await request("/short-links", { method: "POST", body: JSON.stringify({ url: longLink }) });
+      setShortLink(data.short_url);
+      notify("Short link generated.");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
   };
   const copy = async () => {
     if (!shortLink) return;
@@ -3969,10 +4101,10 @@ function Dashboard({ section, notify, playRelease }) {
         <div className="dashboard-content">
           <DashboardHero user={user} stats={stats} />
           <section className="dashboard-kpi-grid">
-            <Metric icon={<Wallet />} label="Revenue" value={money(stats.revenue)} delta="+18% vs last" />
-            <Metric icon={<BarChart3 />} label="Plays" value={shortNumber(stats.plays)} delta="+9%" />
-            <Metric icon={<ArrowDownToLine />} label="Downloads" value={shortNumber(stats.downloads)} delta="+31%" />
-            <Metric icon={<UserPlus />} label="Followers" value={shortNumber(stats.followers)} delta="+42 new" />
+            <Metric icon={<Wallet />} label="Revenue" value={money(stats.revenue)} delta={`${shortNumber(stats.sales || 0)} sales`} />
+            <Metric icon={<BarChart3 />} label="Plays" value={shortNumber(stats.plays)} delta={`${shortNumber(releases.length)} releases`} />
+            <Metric icon={<ArrowDownToLine />} label="Downloads" value={shortNumber(stats.downloads)} delta={`${shortNumber(stats.comments || 0)} comments`} />
+            <Metric icon={<UserPlus />} label="Followers" value={shortNumber(stats.followers)} delta="live count" />
           </section>
           {section === "overview" && (
             <>
@@ -3984,7 +4116,6 @@ function Dashboard({ section, notify, playRelease }) {
                 <LinkShortenerWidget notify={notify} />
                 <RevenueBars releases={releases} />
               </div>
-              <TeamInvitation notify={notify} />
             </>
           )}
           {section === "catalog" && (
@@ -4070,7 +4201,7 @@ function GoogleAuthCallback({ query, notify }) {
 
 function AuthPage({ mode, notify }) {
   const auth = useAuth();
-  const [form, setForm] = useState({ name: "", email: mode === "login" ? "kalden@undisc0ver.com" : "", password: mode === "login" ? "undiscover" : "", genre: "Tech House" });
+  const [form, setForm] = useState({ name: "", email: "", password: "", genre: "Tech House" });
   const [error, setError] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const submit = async (e) => {
@@ -4119,7 +4250,6 @@ function AuthPage({ mode, notify }) {
             <span>G</span>
             Continue with Google
           </button>
-          {isLogin && <p className="auth-demo">Use your Undiscover account credentials.</p>}
         </form>
       </section>
       <section className="auth-visual">
@@ -4207,7 +4337,11 @@ function PackCard({ release }) {
 }
 
 function PackArtwork({ release, large = false }) {
-  return <div className={`pack-art ${release.color || "green"} ${large ? "large" : ""}`}><CrateMark /></div>;
+  return (
+    <div className={`pack-art ${release.color || "green"} ${large ? "large" : ""}`}>
+      {release.cover_url ? <img src={release.cover_url} alt="" /> : <CrateMark />}
+    </div>
+  );
 }
 
 function gateActionLabel(action) {
@@ -4259,7 +4393,7 @@ function DownloadGateChecklist({ release, required, done, notify }) {
     try {
       setState((current) => ({ ...current, busy: action }));
       if (action === "share") {
-        const shareUrl = `${location.origin}${location.pathname}#/release/${release.id}`;
+        const shareUrl = `https://undisc0ver.com/release/${release.id}`;
         if (navigator.share) {
           await navigator.share({ title: release.title, text: `Listen to ${release.title} on Undiscover`, url: shareUrl });
         } else if (navigator.clipboard) {
@@ -4412,6 +4546,8 @@ function Analytics({ releases, stats }) {
   const totalDownloads = releases.reduce((sum, release) => sum + Number(release.downloads || 0), 0);
   const totalPlays = releases.reduce((sum, release) => sum + Number(release.plays || 0), 0);
   const totalSales = releases.reduce((sum, release) => sum + Number(release.sales || 0), 0);
+  const totalLikes = releases.reduce((sum, release) => sum + Number(release.likes || 0), 0);
+  const totalComments = releases.reduce((sum, release) => sum + Number(release.comments || 0), 0);
   const conversion = totalPlays ? ((totalDownloads / totalPlays) * 100).toFixed(1) : "0.0";
   const revenuePerPlay = totalPlays ? (stats.revenue / totalPlays / 100).toFixed(2) : "0.00";
   const funnel = [
@@ -4429,6 +4565,8 @@ function Analytics({ releases, stats }) {
         <div className="analytics-pill-row">
           <span><WifiIcon size={15} /> Conversion {conversion}%</span>
           <span><Wallet size={15} /> EUR/play {revenuePerPlay}</span>
+          <span><Heart size={15} /> {shortNumber(totalLikes)} likes</span>
+          <span><MessageCircle size={15} /> {shortNumber(totalComments)} comments</span>
           <span><Package size={15} /> {releases.length} tracked releases</span>
         </div>
       </div>
@@ -4470,9 +4608,10 @@ function Analytics({ releases, stats }) {
                 <small>{release.genre}</small>
                 <b>{shortNumber(release.plays)} plays</b>
                 <em>{shortNumber(release.downloads)} downloads</em>
-                <i>{money(release.revenue_cents || 0)}</i>
+                <i>{shortNumber(release.likes || 0)} likes · {money(release.revenue_cents || 0)}</i>
               </a>
             ))}
+            {!sorted.length && <p className="muted">No analytics yet. Upload a release to start tracking real plays, likes, comments, downloads and sales.</p>}
           </div>
         </article>
         <article className="analytics-card">

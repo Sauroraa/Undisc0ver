@@ -144,6 +144,13 @@ export function initDb() {
       assignee_role TEXT NOT NULL DEFAULT 'Staff',
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
+    CREATE TABLE IF NOT EXISTS short_links (
+      code TEXT PRIMARY KEY,
+      user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      target_url TEXT NOT NULL,
+      clicks INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
   `);
 
   const userColumns = db.prepare("PRAGMA table_info(users)").all().map((column) => column.name);
@@ -154,6 +161,10 @@ export function initDb() {
   addUserColumn("google_id", "TEXT NOT NULL DEFAULT ''");
   addUserColumn("avatar_url", "TEXT NOT NULL DEFAULT ''");
   addUserColumn("auth_provider", "TEXT NOT NULL DEFAULT 'password'");
+  addUserColumn("logo_url", "TEXT NOT NULL DEFAULT ''");
+  addUserColumn("banner_url", "TEXT NOT NULL DEFAULT ''");
+  addUserColumn("social_links", "TEXT NOT NULL DEFAULT '{}'");
+  addUserColumn("workspace_visibility", "TEXT NOT NULL DEFAULT 'public'");
 
   const releaseColumns = db.prepare("PRAGMA table_info(releases)").all().map((column) => column.name);
   const addReleaseColumn = (name, definition) => {
@@ -174,6 +185,8 @@ export function initDb() {
   addReleaseColumn("audio_file_name", "TEXT NOT NULL DEFAULT ''");
   addReleaseColumn("audio_mime", "TEXT NOT NULL DEFAULT ''");
   addReleaseColumn("audio_size", "INTEGER NOT NULL DEFAULT 0");
+  addReleaseColumn("cover_url", "TEXT NOT NULL DEFAULT ''");
+  addReleaseColumn("visibility", "TEXT NOT NULL DEFAULT 'public'");
 
   const isProduction = process.env.NODE_ENV === "production";
   const seedDemoData = envFlag("SEED_DEMO_DATA", !isProduction);

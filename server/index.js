@@ -31,6 +31,21 @@ const audioUpload = multer({
     cb(allowedMime || allowedExt ? null : new Error("Format audio invalide."), allowedMime || allowedExt);
   }
 });
+const imageUpload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, uploadDir),
+    filename: (_req, file, cb) => {
+      const safeName = file.originalname.replace(/[^a-z0-9._-]/gi, "_").slice(-90);
+      cb(null, `${id("img")}-${safeName}`);
+    }
+  }),
+  limits: { fileSize: Number(process.env.MAX_IMAGE_UPLOAD_MB || 12) * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const allowedMime = /^image\/(png|jpe?g|webp|gif)$/i.test(file.mimetype || "");
+    const allowedExt = /\.(png|jpe?g|webp|gif)$/i.test(file.originalname || "");
+    cb(allowedMime || allowedExt ? null : new Error("Format image invalide."), allowedMime || allowedExt);
+  }
+});
 
 function cents(value) {
   return Number.parseInt(value, 10) || 0;
@@ -215,12 +230,23 @@ function releaseSelect(where = "", order = "r.plays DESC") {
   return `
     SELECT r.*, u.name artist, u.avatar, u.avatar_url, u.verified, u.pro,
       (SELECT COUNT(*) FROM likes l WHERE l.release_id = r.id) likes,
+      (SELECT COUNT(*) FROM release_comments rc WHERE rc.release_id = r.id) comments,
       (SELECT COUNT(*) FROM follows f WHERE f.artist_id = u.id) followers
     FROM releases r
     JOIN users u ON u.id = r.user_id
     ${where}
     ORDER BY ${order}
   `;
+}
+
+function optionalUserId(req) {
+  const token = req.headers.authorization?.replace("Bearer ", "");
+  if (!token) return null;
+  return db.prepare("SELECT user_id FROM sessions WHERE token = ?").get(token)?.user_id || null;
+}
+
+function publicReleaseWhere(prefix = "r") {
+  return `${prefix}.moderation_status = 'published' AND ${prefix}.visibility = 'public'`;
 }
 
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
@@ -333,19 +359,43 @@ app.post("/api/uploads/audio", auth, audioUpload.single("audio"), (req, res) => 
   });
 });
 
+app.post("/api/uploads/image", auth, imageUpload.single("image"), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: "Image requise." });
+  res.json({
+    file: {
+      url: `/uploads/${req.file.filename}`,
+      name: req.file.originalname,
+      mime: req.file.mimetype,
+      size: req.file.size
+    }
+  });
+});
+
 app.get("/api/releases", (req, res) => {
   const q = `%${req.query.q || ""}%`;
   const genre = req.query.genre;
   const rows = genre && genre !== "All"
-    ? db.prepare(releaseSelect("WHERE (r.title LIKE ? OR u.name LIKE ?) AND r.genre = ? AND r.moderation_status = 'published'")).all(q, q, genre)
-    : db.prepare(releaseSelect("WHERE (r.title LIKE ? OR u.name LIKE ?) AND r.moderation_status = 'published'")).all(q, q);
+    ? db.prepare(releaseSelect(`WHERE (r.title LIKE ? OR u.name LIKE ?) AND r.genre = ? AND ${publicReleaseWhere("r")}`)).all(q, q, genre)
+    : db.prepare(releaseSelect(`WHERE (r.title LIKE ? OR u.name LIKE ?) AND ${publicReleaseWhere("r")}`)).all(q, q);
   res.json({ releases: rows });
 });
 
 app.get("/api/releases/:id", (req, res) => {
-  const row = db.prepare(releaseSelect("WHERE r.id = ? AND r.moderation_status = 'published'", "r.created_at DESC")).get(req.params.id);
+  const userId = optionalUserId(req);
+  const row = db.prepare(releaseSelect("WHERE r.id = ? AND r.moderation_status = 'published' AND (r.visibility != 'private' OR r.user_id = ?)", "r.created_at DESC")).get(req.params.id, userId || "");
   if (!row) return res.status(404).json({ error: "Release introuvable." });
-  res.json({ release: row });
+  if (row.visibility === "private" && row.user_id !== userId) return res.status(404).json({ error: "Release introuvable." });
+  db.prepare("UPDATE releases SET plays = plays + 1 WHERE id = ?").run(req.params.id);
+  const fresh = db.prepare(releaseSelect("WHERE r.id = ?", "r.created_at DESC")).get(req.params.id);
+  const comments = db.prepare(`
+    SELECT rc.id, rc.body, rc.created_at, u.id user_id, u.name, u.avatar, u.avatar_url
+    FROM release_comments rc
+    JOIN users u ON u.id = rc.user_id
+    WHERE rc.release_id = ?
+    ORDER BY rc.created_at DESC
+    LIMIT 50
+  `).all(req.params.id);
+  res.json({ release: fresh, comments });
 });
 
 function normalizeGateActions(actions = []) {
@@ -357,7 +407,7 @@ function normalizeGateActions(actions = []) {
 }
 
 app.post("/api/releases", auth, (req, res) => {
-  const { title, kind, genre, tracks, duration, price, free, gate, gate_actions = [], description, rights_confirmed, rights_owner, download_enabled = true, audio_url = "", audio_file_name = "", audio_mime = "", audio_size = 0 } = req.body;
+  const { title, kind, genre, tracks, duration, price, free, gate, gate_actions = [], description, rights_confirmed, rights_owner, download_enabled = true, audio_url = "", audio_file_name = "", audio_mime = "", audio_size = 0, cover_url = "", visibility = "public" } = req.body;
   if (!title || !kind || !genre) return res.status(400).json({ error: "Titre, type et genre sont requis." });
   if (!audio_url) return res.status(400).json({ error: "Upload audio requis avant publication." });
   if (!rights_confirmed) return res.status(400).json({ error: "Confirmation des droits requise avant publication." });
@@ -369,9 +419,10 @@ app.post("/api/releases", auth, (req, res) => {
     : download_enabled ? "No gate" : "Downloads disabled";
   const scan = scanCopyright({ title, artist: req.user.name, description });
   const moderationStatus = moderationFromScan(scan);
+  const releaseVisibility = ["public", "private", "unlisted"].includes(String(visibility).toLowerCase()) ? String(visibility).toLowerCase() : "public";
   db.prepare(`INSERT INTO releases (id, user_id, title, kind, genre, tracks, duration, price_cents, free, gate, gate_actions, description, color, download_enabled,
-      rights_confirmed, rights_owner, scan_status, scan_provider, scan_score, scan_match_title, scan_notes, moderation_status, audio_url, audio_file_name, audio_mime, audio_size)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      rights_confirmed, rights_owner, scan_status, scan_provider, scan_score, scan_match_title, scan_notes, moderation_status, audio_url, audio_file_name, audio_mime, audio_size, cover_url, visibility)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
     .run(
       releaseId,
       req.user.id,
@@ -398,7 +449,9 @@ app.post("/api/releases", auth, (req, res) => {
       String(audio_url),
       String(audio_file_name || ""),
       String(audio_mime || ""),
-      Number(audio_size) || 0
+      Number(audio_size) || 0,
+      String(cover_url || ""),
+      releaseVisibility
     );
   db.prepare("INSERT INTO copyright_scans (id, release_id, provider, status, score, match_title, raw_json) VALUES (?, ?, ?, ?, ?, ?, ?)")
     .run(id("scan"), releaseId, scan.provider, scan.status, scan.score, scan.match_title, JSON.stringify(scan));
@@ -428,6 +481,15 @@ app.post("/api/releases/:id/like", auth, (req, res) => {
   res.json({ liked: !liked, likes: db.prepare("SELECT COUNT(*) total FROM likes WHERE release_id = ?").get(req.params.id).total });
 });
 
+app.post("/api/releases/:id/comments", auth, (req, res) => {
+  const release = db.prepare("SELECT * FROM releases WHERE id = ? AND moderation_status = 'published' AND (visibility != 'private' OR user_id = ?)").get(req.params.id, req.user.id);
+  if (!release) return res.status(404).json({ error: "Release introuvable." });
+  const body = String(req.body.body || "").trim();
+  if (!body) return res.status(400).json({ error: "Commentaire requis." });
+  db.prepare("INSERT INTO release_comments (id, user_id, release_id, body) VALUES (?, ?, ?, ?)").run(id("com"), req.user.id, req.params.id, body.slice(0, 1000));
+  res.json({ ok: true });
+});
+
 function requiredGateActions(release) {
   if (!release.download_enabled) return [];
   try {
@@ -447,7 +509,7 @@ function requiredGateActions(release) {
 }
 
 app.get("/api/releases/:id/gate", auth, (req, res) => {
-  const release = db.prepare("SELECT * FROM releases WHERE id = ? AND moderation_status = 'published'").get(req.params.id);
+  const release = db.prepare("SELECT * FROM releases WHERE id = ? AND moderation_status = 'published' AND (visibility != 'private' OR user_id = ?)").get(req.params.id, req.user.id);
   if (!release) return res.status(404).json({ error: "Release introuvable." });
   const required = requiredGateActions(release);
   const done = db.prepare("SELECT action FROM release_gate_actions WHERE user_id = ? AND release_id = ?").all(req.user.id, req.params.id).map((row) => row.action);
@@ -455,7 +517,7 @@ app.get("/api/releases/:id/gate", auth, (req, res) => {
 });
 
 app.post("/api/releases/:id/gate-action", auth, (req, res) => {
-  const release = db.prepare("SELECT * FROM releases WHERE id = ? AND moderation_status = 'published'").get(req.params.id);
+  const release = db.prepare("SELECT * FROM releases WHERE id = ? AND moderation_status = 'published' AND (visibility != 'private' OR user_id = ?)").get(req.params.id, req.user.id);
   if (!release) return res.status(404).json({ error: "Release introuvable." });
   const action = String(req.body.action || "").toLowerCase();
   const note = String(req.body.note || "").trim();
@@ -478,7 +540,7 @@ app.post("/api/releases/:id/gate-action", auth, (req, res) => {
 });
 
 app.post("/api/releases/:id/download", auth, (req, res) => {
-  const release = db.prepare("SELECT * FROM releases WHERE id = ? AND moderation_status = 'published'").get(req.params.id);
+  const release = db.prepare("SELECT * FROM releases WHERE id = ? AND moderation_status = 'published' AND (visibility != 'private' OR user_id = ?)").get(req.params.id, req.user.id);
   if (!release) return res.status(404).json({ error: "Release introuvable." });
   if (!release.download_enabled) return res.status(403).json({ error: "Le telechargement est desactive pour cette release." });
   const required = requiredGateActions(release);
@@ -491,7 +553,7 @@ app.post("/api/releases/:id/download", auth, (req, res) => {
 });
 
 app.post("/api/releases/:id/buy", auth, (req, res) => {
-  const release = db.prepare("SELECT * FROM releases WHERE id = ?").get(req.params.id);
+  const release = db.prepare("SELECT * FROM releases WHERE id = ? AND moderation_status = 'published' AND (visibility != 'private' OR user_id = ?)").get(req.params.id, req.user.id);
   if (!release) return res.status(404).json({ error: "Release introuvable." });
   const amount = release.price_cents || 0;
   db.prepare("INSERT INTO purchases (id, user_id, release_id, amount_cents) VALUES (?, ?, ?, ?)").run(id("pur"), req.user.id, req.params.id, amount);
@@ -502,14 +564,14 @@ app.post("/api/releases/:id/buy", auth, (req, res) => {
 app.get("/api/artists", (req, res) => {
   const q = `%${req.query.q || ""}%`;
   const rows = db.prepare(`
-    SELECT u.id, u.name, u.avatar, u.avatar_url, u.genre, u.location, u.bio, u.verified, u.pro,
+    SELECT u.id, u.name, u.avatar, u.avatar_url, u.logo_url, u.banner_url, u.social_links, u.genre, u.location, u.bio, u.verified, u.pro,
       COUNT(DISTINCT r.id) releases,
       COALESCE(SUM(r.plays), 0) plays,
       COUNT(DISTINCT f.follower_id) followers
     FROM users u
-    LEFT JOIN releases r ON r.user_id = u.id AND r.moderation_status = 'published'
+    LEFT JOIN releases r ON r.user_id = u.id AND ${publicReleaseWhere("r")}
     LEFT JOIN follows f ON f.artist_id = u.id
-    WHERE u.name LIKE ? OR u.genre LIKE ?
+    WHERE u.workspace_visibility = 'public' AND (u.name LIKE ? OR u.genre LIKE ?)
     GROUP BY u.id
     ORDER BY plays DESC
   `).all(q, q);
@@ -518,19 +580,47 @@ app.get("/api/artists", (req, res) => {
 
 app.get("/api/artists/:id", (req, res) => {
   const artist = db.prepare(`
-    SELECT u.id, u.name, u.avatar, u.avatar_url, u.genre, u.location, u.bio, u.verified, u.pro,
+    SELECT u.id, u.name, u.avatar, u.avatar_url, u.logo_url, u.banner_url, u.social_links, u.genre, u.location, u.bio, u.verified, u.pro,
       COUNT(DISTINCT r.id) releases_count,
       COALESCE(SUM(r.plays), 0) plays,
       COUNT(DISTINCT f.follower_id) followers
     FROM users u
-    LEFT JOIN releases r ON r.user_id = u.id AND r.moderation_status = 'published'
+    LEFT JOIN releases r ON r.user_id = u.id AND ${publicReleaseWhere("r")}
     LEFT JOIN follows f ON f.artist_id = u.id
-    WHERE u.id = ?
+    WHERE u.id = ? AND u.workspace_visibility = 'public'
     GROUP BY u.id
   `).get(req.params.id);
   if (!artist) return res.status(404).json({ error: "Artiste introuvable." });
-  const releases = db.prepare(releaseSelect("WHERE r.user_id = ? AND r.moderation_status = 'published'", "r.created_at DESC")).all(req.params.id);
+  const releases = db.prepare(releaseSelect(`WHERE r.user_id = ? AND ${publicReleaseWhere("r")}`, "r.created_at DESC")).all(req.params.id);
   res.json({ artist, releases });
+});
+
+app.patch("/api/me/settings", auth, (req, res) => {
+  const fields = {
+    name: String(req.body.name || req.user.name).trim(),
+    email: String(req.body.email || req.user.email).trim().toLowerCase(),
+    location: String(req.body.location || "").trim(),
+    bio: String(req.body.bio || "").trim(),
+    genre: String(req.body.genre || req.user.genre || "Tech House").trim(),
+    avatar_url: String(req.body.avatar_url || "").trim(),
+    logo_url: String(req.body.logo_url || "").trim(),
+    banner_url: String(req.body.banner_url || "").trim(),
+    workspace_visibility: ["public", "private"].includes(String(req.body.workspace_visibility).toLowerCase()) ? String(req.body.workspace_visibility).toLowerCase() : "public",
+    social_links: JSON.stringify({
+      instagram: String(req.body.instagram || "").trim(),
+      soundcloud: String(req.body.soundcloud || "").trim(),
+      spotify: String(req.body.spotify || "").trim(),
+      website: String(req.body.website || "").trim()
+    })
+  };
+  if (!fields.name || !fields.email) return res.status(400).json({ error: "Nom et email requis." });
+  try {
+    db.prepare(`UPDATE users SET name = ?, email = ?, location = ?, bio = ?, genre = ?, avatar_url = ?, logo_url = ?, banner_url = ?, workspace_visibility = ?, social_links = ? WHERE id = ?`)
+      .run(fields.name, fields.email, fields.location, fields.bio, fields.genre, fields.avatar_url, fields.logo_url, fields.banner_url, fields.workspace_visibility, fields.social_links, req.user.id);
+    res.json({ user: publicUser(db.prepare("SELECT * FROM users WHERE id = ?").get(req.user.id)) });
+  } catch {
+    res.status(409).json({ error: "Cet email existe deja." });
+  }
 });
 
 app.post("/api/artists/:id/follow", auth, (req, res) => {
@@ -544,12 +634,13 @@ app.post("/api/artists/:id/follow", auth, (req, res) => {
 app.get("/api/dashboard", auth, (req, res) => {
   const stats = db.prepare(`
     SELECT COALESCE(SUM(revenue_cents), 0) revenue, COALESCE(SUM(plays), 0) plays,
-      COALESCE(SUM(downloads), 0) downloads, COUNT(*) releases
+      COALESCE(SUM(downloads), 0) downloads, COALESCE(SUM(sales), 0) sales, COUNT(*) releases
     FROM releases WHERE user_id = ? AND moderation_status != 'removed'
   `).get(req.user.id);
   const followers = db.prepare("SELECT COUNT(*) total FROM follows WHERE artist_id = ?").get(req.user.id).total;
+  const comments = db.prepare("SELECT COUNT(*) total FROM release_comments rc JOIN releases r ON r.id = rc.release_id WHERE r.user_id = ?").get(req.user.id).total;
   const releases = db.prepare(releaseSelect("WHERE r.user_id = ? AND r.moderation_status != 'removed'", "r.created_at DESC")).all(req.user.id);
-  res.json({ stats: { ...stats, followers }, releases });
+  res.json({ stats: { ...stats, followers, comments }, releases });
 });
 
 app.post("/api/support/tickets", (req, res) => {
@@ -560,6 +651,27 @@ app.post("/api/support/tickets", (req, res) => {
   db.prepare("INSERT INTO support_tickets (id, user_id, name, email, topic, message) VALUES (?, ?, ?, ?, ?, ?)")
     .run(ticketId, userId || null, name, email, topic, message);
   res.json({ ok: true, ticket: { id: ticketId, status: "open" } });
+});
+
+app.post("/api/short-links", auth, (req, res) => {
+  const targetUrl = String(req.body.url || "").trim();
+  try {
+    const parsed = new URL(targetUrl);
+    if (!["http:", "https:"].includes(parsed.protocol)) throw new Error("invalid");
+  } catch {
+    return res.status(400).json({ error: "URL invalide." });
+  }
+  let code = id("r").replace(/^r_?/, "").slice(0, 8);
+  while (db.prepare("SELECT 1 FROM short_links WHERE code = ?").get(code)) code = id("r").replace(/^r_?/, "").slice(0, 8);
+  db.prepare("INSERT INTO short_links (code, user_id, target_url) VALUES (?, ?, ?)").run(code, req.user.id, targetUrl);
+  res.json({ code, short_url: `${siteUrl}/r/${code}`, target_url: targetUrl });
+});
+
+app.get("/r/:code", (req, res) => {
+  const link = db.prepare("SELECT * FROM short_links WHERE code = ?").get(req.params.code);
+  if (!link) return res.redirect(`${siteUrl}/#/explore`);
+  db.prepare("UPDATE short_links SET clicks = clicks + 1 WHERE code = ?").run(req.params.code);
+  res.redirect(link.target_url);
 });
 
 app.get("/api/staff/overview", staffAuth, (_req, res) => {
@@ -611,7 +723,7 @@ app.get("/robots.txt", (_req, res) => {
 
 app.get("/sitemap.xml", (_req, res) => {
   const artists = db.prepare("SELECT id, created_at FROM users ORDER BY created_at DESC").all();
-  const releases = db.prepare("SELECT id, created_at FROM releases WHERE moderation_status = 'published' ORDER BY created_at DESC").all();
+  const releases = db.prepare("SELECT id, created_at FROM releases WHERE moderation_status = 'published' AND visibility = 'public' ORDER BY created_at DESC").all();
   const entries = [
     ...sitemapRoutes.map(sitemapEntry),
     ...artists.map((artist) => sitemapEntry({ path: `/artist/${artist.id}`, lastmod: artist.created_at, changefreq: "weekly", priority: "0.7" })),
