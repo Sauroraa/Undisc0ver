@@ -151,6 +151,9 @@ export function initDb() {
     if (!userColumns.includes(name)) db.exec(`ALTER TABLE users ADD COLUMN ${name} ${definition}`);
   };
   addUserColumn("role", "TEXT NOT NULL DEFAULT 'user'");
+  addUserColumn("google_id", "TEXT NOT NULL DEFAULT ''");
+  addUserColumn("avatar_url", "TEXT NOT NULL DEFAULT ''");
+  addUserColumn("auth_provider", "TEXT NOT NULL DEFAULT 'password'");
 
   const releaseColumns = db.prepare("PRAGMA table_info(releases)").all().map((column) => column.name);
   const addReleaseColumn = (name, definition) => {

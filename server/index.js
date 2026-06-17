@@ -1,5 +1,6 @@
 import express from "express";
 import multer from "multer";
+import crypto from "node:crypto";
 import { existsSync, mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -42,6 +43,12 @@ const scanConfig = {
   reviewThreshold: Number(process.env.COPYRIGHT_REVIEW_THRESHOLD || 45)
 };
 const siteUrl = String(process.env.PUBLIC_SITE_URL || "https://undisc0ver.com").replace(/\/$/, "");
+const googleAuth = {
+  clientId: process.env.GOOGLE_CLIENT_ID || "",
+  clientSecret: process.env.GOOGLE_CLIENT_SECRET || "",
+  redirectUri: process.env.GOOGLE_REDIRECT_URI || `${siteUrl}/api/auth/google/callback`,
+  stateSecret: process.env.AUTH_STATE_SECRET || process.env.GOOGLE_CLIENT_SECRET || process.env.ADMIN_PASSWORD || "undiscover-dev-state"
+};
 const sitemapRoutes = [
   { path: "/", priority: "1.0", changefreq: "daily" },
   { path: "/explore", priority: "0.9", changefreq: "daily" },
@@ -81,6 +88,61 @@ function sitemapEntry({ path, lastmod, changefreq = "weekly", priority = "0.5" }
     `    <priority>${priority}</priority>`,
     "  </url>"
   ].join("\n");
+}
+
+function initialsForName(name = "") {
+  return String(name)
+    .trim()
+    .split(/\s+/)
+    .map((part) => part[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase() || "U0";
+}
+
+function makeGoogleState() {
+  const payload = Buffer.from(JSON.stringify({ nonce: id("gst"), created_at: Date.now() })).toString("base64url");
+  const signature = crypto.createHmac("sha256", googleAuth.stateSecret).update(payload).digest("base64url");
+  return `${payload}.${signature}`;
+}
+
+function verifyGoogleState(state = "") {
+  const [payload, signature] = String(state).split(".");
+  if (!payload || !signature) return false;
+  const expected = crypto.createHmac("sha256", googleAuth.stateSecret).update(payload).digest("base64url");
+  if (Buffer.byteLength(signature) !== Buffer.byteLength(expected)) return false;
+  if (!crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) return false;
+  const data = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+  return Date.now() - Number(data.created_at || 0) < 10 * 60 * 1000;
+}
+
+function authRedirect(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  return `${siteUrl}/#/auth/google-callback${query ? `?${query}` : ""}`;
+}
+
+async function fetchGoogleProfile(code) {
+  const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      code,
+      client_id: googleAuth.clientId,
+      client_secret: googleAuth.clientSecret,
+      redirect_uri: googleAuth.redirectUri,
+      grant_type: "authorization_code"
+    })
+  });
+  const tokenData = await tokenRes.json().catch(() => ({}));
+  if (!tokenRes.ok || !tokenData.access_token) throw new Error(tokenData.error_description || "Google token exchange failed.");
+
+  const profileRes = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
+    headers: { Authorization: `Bearer ${tokenData.access_token}` }
+  });
+  const profile = await profileRes.json().catch(() => ({}));
+  if (!profileRes.ok || !profile.email || !profile.sub) throw new Error("Google profile could not be loaded.");
+  if (profile.email_verified === false) throw new Error("Google email is not verified.");
+  return profile;
 }
 
 function scanCopyright({ title = "", artist = "", description = "" }) {
@@ -151,7 +213,7 @@ function staffAuth(req, res, next) {
 
 function releaseSelect(where = "", order = "r.plays DESC") {
   return `
-    SELECT r.*, u.name artist, u.avatar, u.verified, u.pro,
+    SELECT r.*, u.name artist, u.avatar, u.avatar_url, u.verified, u.pro,
       (SELECT COUNT(*) FROM likes l WHERE l.release_id = r.id) likes,
       (SELECT COUNT(*) FROM follows f WHERE f.artist_id = u.id) followers
     FROM releases r
@@ -195,6 +257,53 @@ app.post("/api/auth/login", (req, res) => {
   const token = id("tok");
   db.prepare("INSERT INTO sessions (token, user_id) VALUES (?, ?)").run(token, user.id);
   res.json({ token, user: publicUser(user) });
+});
+
+app.get("/api/auth/google/start", (_req, res) => {
+  if (!googleAuth.clientId || !googleAuth.clientSecret) {
+    return res.redirect(authRedirect({ error: "Google auth is not configured." }));
+  }
+  const params = new URLSearchParams({
+    client_id: googleAuth.clientId,
+    redirect_uri: googleAuth.redirectUri,
+    response_type: "code",
+    scope: "openid email profile",
+    prompt: "select_account",
+    access_type: "offline",
+    state: makeGoogleState()
+  });
+  res.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`);
+});
+
+app.get("/api/auth/google/callback", async (req, res) => {
+  const { code, state, error } = req.query;
+  if (error) return res.redirect(authRedirect({ error: String(error) }));
+  if (!code || !verifyGoogleState(state)) return res.redirect(authRedirect({ error: "Invalid Google auth state." }));
+  try {
+    const profile = await fetchGoogleProfile(String(code));
+    const email = String(profile.email || "").toLowerCase();
+    const name = String(profile.name || email.split("@")[0] || "Google Artist").trim();
+    const avatar = initialsForName(name);
+    let user = db.prepare("SELECT * FROM users WHERE google_id = ? AND google_id != ''").get(String(profile.sub));
+    if (!user) user = db.prepare("SELECT * FROM users WHERE email = ?").get(email);
+
+    if (user) {
+      db.prepare("UPDATE users SET google_id = ?, avatar_url = ?, auth_provider = CASE WHEN auth_provider LIKE '%password%' THEN 'password+google' ELSE 'google' END WHERE id = ?")
+        .run(String(profile.sub), String(profile.picture || ""), user.id);
+    } else {
+      const userId = id("usr");
+      db.prepare("INSERT INTO users (id, name, email, password_hash, avatar, avatar_url, google_id, auth_provider, genre, bio) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+        .run(userId, name, email, hashPassword(id("google")), avatar, String(profile.picture || ""), String(profile.sub), "google", "Electronic", "Nouvel artiste Undiscover.");
+      user = db.prepare("SELECT * FROM users WHERE id = ?").get(userId);
+    }
+
+    const freshUser = db.prepare("SELECT * FROM users WHERE email = ?").get(email);
+    const token = id("tok");
+    db.prepare("INSERT INTO sessions (token, user_id) VALUES (?, ?)").run(token, freshUser.id);
+    res.redirect(authRedirect({ token }));
+  } catch (err) {
+    res.redirect(authRedirect({ error: err.message || "Google auth failed." }));
+  }
 });
 
 app.get("/api/me", auth, (req, res) => res.json({ user: publicUser(req.user) }));
@@ -393,7 +502,7 @@ app.post("/api/releases/:id/buy", auth, (req, res) => {
 app.get("/api/artists", (req, res) => {
   const q = `%${req.query.q || ""}%`;
   const rows = db.prepare(`
-    SELECT u.id, u.name, u.avatar, u.genre, u.location, u.bio, u.verified, u.pro,
+    SELECT u.id, u.name, u.avatar, u.avatar_url, u.genre, u.location, u.bio, u.verified, u.pro,
       COUNT(DISTINCT r.id) releases,
       COALESCE(SUM(r.plays), 0) plays,
       COUNT(DISTINCT f.follower_id) followers
@@ -409,7 +518,7 @@ app.get("/api/artists", (req, res) => {
 
 app.get("/api/artists/:id", (req, res) => {
   const artist = db.prepare(`
-    SELECT u.id, u.name, u.avatar, u.genre, u.location, u.bio, u.verified, u.pro,
+    SELECT u.id, u.name, u.avatar, u.avatar_url, u.genre, u.location, u.bio, u.verified, u.pro,
       COUNT(DISTINCT r.id) releases_count,
       COALESCE(SUM(r.plays), 0) plays,
       COUNT(DISTINCT f.follower_id) followers
@@ -454,7 +563,7 @@ app.post("/api/support/tickets", (req, res) => {
 });
 
 app.get("/api/staff/overview", staffAuth, (_req, res) => {
-  const users = db.prepare("SELECT id, name, email, avatar, role, verified, pro, created_at FROM users ORDER BY created_at DESC").all();
+  const users = db.prepare("SELECT id, name, email, avatar, avatar_url, role, verified, pro, auth_provider, created_at FROM users ORDER BY created_at DESC").all();
   const releases = db.prepare(releaseSelect("WHERE r.moderation_status != 'removed'", "r.created_at DESC")).all();
   const tickets = db.prepare("SELECT * FROM support_tickets ORDER BY created_at DESC").all();
   const reports = db.prepare("SELECT tr.*, r.title release_title FROM takedown_reports tr JOIN releases r ON r.id = tr.release_id ORDER BY tr.created_at DESC").all();

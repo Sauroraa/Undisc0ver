@@ -986,6 +986,11 @@ function AuthProvider({ children }) {
       localStorage.setItem("undiscover_token", data.token);
       setUser(data.user);
     },
+    async loginWithToken(token) {
+      localStorage.setItem("undiscover_token", token);
+      const data = await request("/me");
+      setUser(data.user);
+    },
     async logout() {
       await request("/auth/logout", { method: "POST" }).catch(() => {});
       localStorage.removeItem("undiscover_token");
@@ -1593,8 +1598,8 @@ function TrustedAvatarStack() {
           >
             <span className="trusted-avatar-index">{idx}</span>
             <span className="trusted-avatar-face">
-              {isImageAvatar(artist.avatar)
-                ? <img src={artist.avatar} alt="" />
+              {isImageAvatar(artist.avatar_url || artist.avatar)
+                ? <img src={artist.avatar_url || artist.avatar} alt="" />
                 : <span>{artist.avatar || initials(artist.name)}</span>}
             </span>
             <i>{artist.name}</i>
@@ -2144,6 +2149,7 @@ function renderRoute(route, notify, playRelease) {
   if (path === "/payouts") return <Dashboard notify={notify} playRelease={playRelease} section="payouts" />;
   if (path === "/login") return <AuthPage mode="login" notify={notify} />;
   if (path === "/register") return <AuthPage mode="register" notify={notify} />;
+  if (path === "/auth/google-callback") return <GoogleAuthCallback query={query} notify={notify} />;
   return <NotFound />;
 }
 
@@ -4015,6 +4021,53 @@ function CopyrightConsole({ releases }) {
   );
 }
 
+function GoogleAuthCallback({ query, notify }) {
+  const auth = useAuth();
+  const [message, setMessage] = useState("Connexion Google en cours...");
+
+  useEffect(() => {
+    const params = new URLSearchParams(query || "");
+    const token = params.get("token");
+    const error = params.get("error");
+    if (error) {
+      setMessage(error);
+      notify(error);
+      return;
+    }
+    if (!token) {
+      setMessage("Google auth did not return a token.");
+      return;
+    }
+    auth.loginWithToken(token)
+      .then(() => {
+        notify("Logged in with Google.");
+        location.hash = "#/dashboard";
+      })
+      .catch((err) => {
+        localStorage.removeItem("undiscover_token");
+        setMessage(err.message || "Google login failed.");
+      });
+  }, [query]);
+
+  return (
+    <main className="auth-shell">
+      <section className="auth-panel">
+        <div className="auth-card">
+          <Logo />
+          <div className="auth-title">
+            <h1>Google login</h1>
+            <p>{message}</p>
+          </div>
+          <a className="button ghost" href="#/login">Back to login</a>
+        </div>
+      </section>
+      <section className="auth-visual">
+        <div className="auth-mark"><BrandMark label="Undiscover" /><span>Undiscover</span></div>
+      </section>
+    </main>
+  );
+}
+
 function AuthPage({ mode, notify }) {
   const auth = useAuth();
   const [form, setForm] = useState({ name: "", email: mode === "login" ? "kalden@undisc0ver.com" : "", password: mode === "login" ? "undiscover" : "", genre: "Tech House" });
@@ -4062,7 +4115,7 @@ function AuthPage({ mode, notify }) {
             <a href={isLogin ? "#/register" : "#/login"}>{isLogin ? "Sign up" : "Sign in"}</a>
           </p>
           <div className="auth-separator"><span>Or continue with</span></div>
-          <button className="button google-button" type="button" onClick={() => notify("Google auth provider is not configured yet.")}>
+          <button className="button google-button" type="button" onClick={() => { location.href = "/api/auth/google/start"; }}>
             <span>G</span>
             Continue with Google
           </button>
