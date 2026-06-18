@@ -4394,6 +4394,7 @@ function ImageUploadPanel({ file, setFile, title = "Image upload", text = "Uploa
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [saved, setSaved] = useState(false);
   const [settings, setSettings] = useState({ width: defaultWidth, height: defaultHeight, zoom: 1, panX: 0, panY: 0 });
   const [preview, setPreview] = useState("");
   useEffect(() => {
@@ -4442,6 +4443,7 @@ function ImageUploadPanel({ file, setFile, title = "Image upload", text = "Uploa
     setFile(nextFile);
     setEditing(!!nextFile);
     setError("");
+    setSaved(false);
     resetSettings();
   };
   const stopDrag = () => {
@@ -4470,6 +4472,7 @@ function ImageUploadPanel({ file, setFile, title = "Image upload", text = "Uploa
     if (!sourceFile && !file) return;
     setBusy(true);
     setError("");
+    setSaved(false);
     try {
       const rect = cropRef.current?.getBoundingClientRect();
       const panScaleX = rect?.width ? Number(settings.width) / rect.width : 1;
@@ -4483,6 +4486,7 @@ function ImageUploadPanel({ file, setFile, title = "Image upload", text = "Uploa
       setSourceFile(editedFile);
       setFile(editedFile);
       setEditing(false);
+      setSaved(true);
     } catch {
       setError("Image save failed. Try another image.");
     } finally {
@@ -4494,6 +4498,7 @@ function ImageUploadPanel({ file, setFile, title = "Image upload", text = "Uploa
     setFile(null);
     setEditing(false);
     setError("");
+    setSaved(false);
   };
   return (
     <section className="file-upload-card image-upload-card">
@@ -4528,13 +4533,14 @@ function ImageUploadPanel({ file, setFile, title = "Image upload", text = "Uploa
             <label>Width<input type="number" min="64" max="4000" value={settings.width} onChange={(e) => updateSetting("width", e.target.value)} /></label>
             <label>Height<input type="number" min="64" max="4000" value={settings.height} onChange={(e) => updateSetting("height", e.target.value)} /></label>
             <label>Zoom<input type="range" min="1" max="4" step=".05" value={settings.zoom} onChange={(e) => updateZoom(e.target.value)} /></label>
-            <button className="button accent" type="button" onClick={saveImage} disabled={busy}>{busy ? <Loader2 className="spin" size={16} /> : <Check size={16} />} Save image</button>
+            <button className="button accent image-save-button" type="button" onPointerDown={(event) => event.stopPropagation()} onClick={saveImage} disabled={busy}>{busy ? <Loader2 className="spin" size={16} /> : <Check size={16} />} Save image</button>
             <button className="button ghost" type="button" onClick={resetSettings}>Reset</button>
           </div>
           {error && <p className="image-edit-error">{error}</p>}
         </div>
       )}
-      {file && !editing && <button className="button ghost" type="button" onClick={() => { setSourceFile(file); setError(""); setEditing(true); }}><Settings size={16} /> Edit crop</button>}
+      {saved && !editing && <p className="image-edit-success"><Check size={14} /> Image saved</p>}
+      {file && !editing && <button className="button ghost" type="button" onClick={() => { setSourceFile(file); setError(""); setSaved(false); setEditing(true); }}><Settings size={16} /> Edit crop</button>}
       {file && <button className="button ghost" type="button" onClick={removeImage}><Trash size={16} /> Remove image</button>}
     </section>
   );

@@ -1682,6 +1682,8 @@ h1, h2, h3, p { margin-top: 0; }
   display: grid;
   gap: 10px;
   grid-template-columns: 130px repeat(3, minmax(78px, 1fr)) auto auto;
+  position: relative;
+  z-index: 3;
 }
 .image-edit-controls label {
   color: var(--muted);
@@ -1707,11 +1709,26 @@ h1, h2, h3, p { margin-top: 0; }
 .image-edit-controls input[type="range"] {
   padding: 0;
 }
+.image-save-button {
+  cursor: pointer;
+  pointer-events: auto;
+  position: relative;
+  z-index: 4;
+}
 .image-edit-error {
   color: #ff7d7d;
   font-size: 12px;
   font-weight: 750;
   margin: -2px 0 0;
+}
+.image-edit-success {
+  align-items: center;
+  color: var(--success);
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 850;
+  gap: 6px;
+  margin: 0;
 }
 
 .release-detail-page {
