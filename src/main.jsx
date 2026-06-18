@@ -826,6 +826,9 @@ Object.assign(TRANSLATIONS.fr, {
   "Pro": "Pro",
   "Label": "Label",
   "Apply crop": "Appliquer le cadrage",
+  "Save image": "Sauvegarder",
+  "Image saved": "Image sauvegardee",
+  "Image save failed. Try another image.": "Sauvegarde impossible. Essaie une autre image.",
   "Edit crop": "Modifier le cadrage",
   "Preset": "Preset",
   "Avatar": "Avatar",
@@ -850,6 +853,10 @@ Object.assign(TRANSLATIONS.fr, {
   "paid release(s)": "sortie(s) payantes",
   "rights checks active.": "checks droits actifs.",
   "Free gate(s)": "Gate(s) gratuits",
+  "Manual review": "Review manuelle",
+  "Rights policy": "Politique droits",
+  "Active": "Actif",
+  "rights check": "controle droits",
   "No audio selected": "Aucun audio selectionne",
   "Choose a WAV, MP3 or AIFF file to attach to this release.": "Choisis un fichier WAV, MP3 ou AIFF a attacher a cette sortie."
 });
@@ -888,6 +895,9 @@ Object.assign(TRANSLATIONS.nl, {
   "Pro": "Pro",
   "Label": "Label",
   "Apply crop": "Crop toepassen",
+  "Save image": "Afbeelding opslaan",
+  "Image saved": "Afbeelding opgeslagen",
+  "Image save failed. Try another image.": "Opslaan mislukt. Probeer een andere afbeelding.",
   "Edit crop": "Crop bewerken",
   "Preset": "Preset",
   "Avatar": "Avatar",
@@ -907,7 +917,11 @@ Object.assign(TRANSLATIONS.nl, {
   "live drops": "live drops",
   "free gate(s)": "gratis gate(s)",
   "paid release(s)": "betaalde release(s)",
-  "rights checks active.": "rechtenchecks actief."
+  "rights checks active.": "rechtenchecks actief.",
+  "Manual review": "Handmatige review",
+  "Rights policy": "Rechtenbeleid",
+  "Active": "Actief",
+  "rights check": "rechtencontrole"
 });
 
 Object.assign(TRANSLATIONS.de, {
@@ -944,6 +958,9 @@ Object.assign(TRANSLATIONS.de, {
   "Pro": "Pro",
   "Label": "Label",
   "Apply crop": "Crop anwenden",
+  "Save image": "Bild speichern",
+  "Image saved": "Bild gespeichert",
+  "Image save failed. Try another image.": "Speichern fehlgeschlagen. Versuche ein anderes Bild.",
   "Edit crop": "Crop bearbeiten",
   "Preset": "Preset",
   "Avatar": "Avatar",
@@ -963,7 +980,11 @@ Object.assign(TRANSLATIONS.de, {
   "live drops": "Live Drops",
   "free gate(s)": "Gratis Gate(s)",
   "paid release(s)": "bezahlte Release(s)",
-  "rights checks active.": "Rechtechecks aktiv."
+  "rights checks active.": "Rechtechecks aktiv.",
+  "Manual review": "Manuelle Prufung",
+  "Rights policy": "Rechte-Policy",
+  "Active": "Aktiv",
+  "rights check": "Rechtecheck"
 });
 
 const originalTextNodes = new WeakMap();
@@ -1117,6 +1138,26 @@ function money(cents) {
   return `${Math.round(cents / 100)} EUR`;
 }
 
+function balanceMoney(cents) {
+  const amount = Number(cents || 0) / 100;
+  const hasDecimals = Math.abs(amount % 1) > 0;
+  return `${amount.toLocaleString("fr-FR", { minimumFractionDigits: hasDecimals ? 2 : 0, maximumFractionDigits: 2 })} EUR`;
+}
+
+function percentDelta(current, previous) {
+  const next = Number(current || 0);
+  const before = Number(previous || 0);
+  if (!next && !before) return 0;
+  if (next && !before) return 100;
+  return Math.round(((next - before) / before) * 100);
+}
+
+function deltaLabel(current, previous, suffix = "vs last week") {
+  const delta = percentDelta(current, previous);
+  const sign = delta > 0 ? "+" : "";
+  return `${sign}${delta}% ${suffix}`;
+}
+
 function shortNumber(value) {
   if (value >= 1000) return `${(value / 1000).toFixed(value >= 10000 ? 0 : 1)}k`;
   return String(value);
@@ -1127,6 +1168,10 @@ function parseDurationSeconds(value = "0:00") {
   if (parts.length === 3) return (parts[0] * 3600) + (parts[1] * 60) + parts[2];
   if (parts.length === 2) return (parts[0] * 60) + parts[1];
   return parts[0] || 0;
+}
+
+function audioPreviewLimitSeconds(release = {}) {
+  return release.free ? null : 45;
 }
 
 function formatDuration(seconds = 0) {
@@ -1786,8 +1831,11 @@ function MusicPlayer({ release, isPlaying, setIsPlaying, onClose, notify }) {
   const [playerDuration, setPlayerDuration] = useState(0);
   const [waveform, setWaveform] = useState([]);
   const audioRef = useRef(null);
-  const durationSeconds = parseDurationSeconds(release?.duration || "06:00") || 360;
-  const audioDuration = playerDuration || (audioRef.current?.duration && Number.isFinite(audioRef.current.duration) ? audioRef.current.duration : durationSeconds);
+  const previewLimit = audioPreviewLimitSeconds(release);
+  const storedDuration = release?.duration && release.duration !== "06:00" ? parseDurationSeconds(release.duration) : 0;
+  const elementDuration = audioRef.current?.duration && Number.isFinite(audioRef.current.duration) ? audioRef.current.duration : 0;
+  const rawAudioDuration = playerDuration || elementDuration || (previewLimit ? previewLimit : storedDuration);
+  const audioDuration = previewLimit ? Math.min(previewLimit, rawAudioDuration) : rawAudioDuration;
   const currentSeconds = Math.min(audioDuration, Math.floor((progress / 100) * audioDuration));
   const waveBars = waveform.length ? waveform : fallbackWaveform(`${release?.title || ""}${release?.artist || ""}`);
 
@@ -1837,7 +1885,7 @@ function MusicPlayer({ release, isPlaying, setIsPlaying, onClose, notify }) {
   const seek = (percent) => {
     const audio = audioRef.current;
     setProgress(percent);
-    if (audio?.duration && Number.isFinite(audio.duration)) audio.currentTime = (percent / 100) * audio.duration;
+    if (audio?.duration && Number.isFinite(audio.duration)) audio.currentTime = (percent / 100) * audioDuration;
   };
 
   return (
@@ -1849,10 +1897,16 @@ function MusicPlayer({ release, isPlaying, setIsPlaying, onClose, notify }) {
           onLoadedMetadata={(event) => {
             const audio = event.currentTarget;
             if (audio.duration && Number.isFinite(audio.duration)) setPlayerDuration(audio.duration);
+            else if (previewLimit) setPlayerDuration(previewLimit);
           }}
           onTimeUpdate={(event) => {
             const audio = event.currentTarget;
-            if (audio.duration && Number.isFinite(audio.duration)) setProgress((audio.currentTime / audio.duration) * 100);
+            if (previewLimit && audio.currentTime >= previewLimit) {
+              audio.pause();
+              audio.currentTime = previewLimit;
+              setIsPlaying(false);
+            }
+            if (audioDuration) setProgress((Math.min(audio.currentTime, audioDuration) / audioDuration) * 100);
           }}
           onEnded={() => setIsPlaying(false)}
         />
@@ -2982,12 +3036,73 @@ function AcceptableUsePage() {
 }
 
 function CareersPage() {
+  const { user } = useAuth();
+  const careerRoles = [
+    { role: "Staff", title: "Staff support", access: "Support queue", text: "Aide les artistes, trie les tickets, remonte les bugs et garde les workflows clairs.", skills: ["Support artiste", "Tickets", "Guidelines"] },
+    { role: "Moderator", title: "Moderateur catalogue", access: "Moderation tools", text: "Controle les sorties, copyright reports, commentaires et signaux d'abus.", skills: ["Copyright", "Takedowns", "Qualite catalogue"] },
+    { role: "Community Manager", title: "Community Manager", access: "Community ops", text: "Anime les artistes, prepare les annonces, met en avant les sorties et suit les retours.", skills: ["Discord/social", "Curation", "Communication"] },
+    { role: "Manager", title: "Manager operations", access: "Artist growth", text: "Accompagne les artistes Pro/Label, campagnes, partenariats et organisation release.", skills: ["Partnerships", "Campagnes", "Suivi artiste"] },
+    { role: "Developer", title: "Developpeur platform", access: "Product build", text: "Construit les features, securise les uploads, ameliore le player et les outils staff.", skills: ["React/Node", "Security", "Product"] }
+  ];
+  const [form, setForm] = useState({ name: user?.name || "", email: user?.email || "", role: "Staff", availability: "", links: "", experience: "" });
+  const [status, setStatus] = useState("");
+  const [error, setError] = useState("");
+  const update = (key, value) => setForm((current) => ({ ...current, [key]: value }));
+  const submit = async (event) => {
+    event.preventDefault();
+    setError("");
+    setStatus("");
+    try {
+      await request("/careers/apply", { method: "POST", body: JSON.stringify(form) });
+      setStatus("Candidature envoyee. L'equipe te recontacte si ton profil match.");
+      setForm((current) => ({ ...current, availability: "", links: "", experience: "" }));
+    } catch (err) {
+      setError(err.message);
+    }
+  };
   return (
-    <main className="page narrow">
-      <PageHeader eyebrow="Careers" title="Build the artist storefront layer." text="Staff, Moderator and Admin roles are ready for production operations." />
-      <div className="release-grid">
-        {["Support staff", "Catalog moderator", "Platform admin"].map((role) => <article className="card" key={role}><h2>{role}</h2><p className="muted">Help artists ship releases, clear tickets and keep the catalog clean.</p><a className="button ghost" href="#/support">Contact us</a></article>)}
-      </div>
+    <main className="page careers-page">
+      <PageHeader eyebrow="Careers" title="Build the Undiscover team." text="Staff, moderation, community, management and development roles for a clean artist platform." />
+      <section className="career-roles-grid">
+        {careerRoles.map((item) => (
+          <article className="career-role-card" key={item.role}>
+            <span className="outline-tag">{item.access}</span>
+            <h2>{item.title}</h2>
+            <p>{item.text}</p>
+            <div>{item.skills.map((skill) => <small key={skill}>{skill}</small>)}</div>
+            <button className="button ghost" type="button" onClick={() => update("role", item.role)}>Choisir ce role</button>
+          </article>
+        ))}
+      </section>
+      <section className="career-system-grid">
+        <article>
+          <p className="label">Workflow</p>
+          <h2>Un vrai pipeline d'equipe</h2>
+          <ul>
+            <li><Check size={16} /> Candidature sauvegardee en base</li>
+            <li><Check size={16} /> Review dans le panel staff</li>
+            <li><Check size={16} /> Statuts: nouveau, review, interview, accepte, refuse</li>
+            <li><Check size={16} /> Roles alignes avec moderation, support et operations</li>
+          </ul>
+        </article>
+        <form className="career-apply-card" onSubmit={submit}>
+          <div>
+            <p className="label">Apply</p>
+            <h2>Candidature</h2>
+          </div>
+          <div className="form-grid">
+            <label>Nom<input value={form.name} onChange={(e) => update("name", e.target.value)} required /></label>
+            <label>Email<input type="email" value={form.email} onChange={(e) => update("email", e.target.value)} required /></label>
+          </div>
+          <label>Role<select value={form.role} onChange={(e) => update("role", e.target.value)}>{careerRoles.map((item) => <option key={item.role}>{item.role}</option>)}</select></label>
+          <label>Disponibilite<input value={form.availability} onChange={(e) => update("availability", e.target.value)} placeholder="Ex: soirs, week-end, 10h/semaine" /></label>
+          <label>Liens<input value={form.links} onChange={(e) => update("links", e.target.value)} placeholder="Portfolio, GitHub, socials..." /></label>
+          <label>Experience<textarea value={form.experience} onChange={(e) => update("experience", e.target.value)} placeholder="Explique ce que tu peux apporter a Undiscover..." required /></label>
+          {error && <p className="error">{error}</p>}
+          {status && <p className="success-text">{status}</p>}
+          <button className="button accent" type="submit"><UserPlus size={16} /> Envoyer la candidature</button>
+        </form>
+      </section>
     </main>
   );
 }
@@ -3029,6 +3144,9 @@ function StaffPanel({ notify }) {
   const reportStatus = async (id, status) => {
     await runStaffAction(() => request(`/staff/reports/${id}/status`, { method: "POST", body: JSON.stringify({ status }) }), "Copyright report updated.");
   };
+  const applicationStatus = async (id, status) => {
+    await runStaffAction(() => request(`/staff/applications/${id}/status`, { method: "POST", body: JSON.stringify({ status }) }), "Application updated.");
+  };
   return (
     <main className="page dashboard-page">
       <div className="staff-shell">
@@ -3038,6 +3156,7 @@ function StaffPanel({ notify }) {
           <Metric icon={<Package />} label="Releases" value={data.releases.length} delta={`${data.releases.filter((r) => r.moderation_status === "review").length} review`} />
           <Metric icon={<LifeBuoy />} label="Tickets" value={data.tickets.length} delta={`${data.tickets.filter((t) => t.status === "open").length} open`} />
           <Metric icon={<ShieldAlert />} label="Reports" value={data.reports.length} delta="copyright" />
+          <Metric icon={<UserPlus />} label="Careers" value={(data.applications || []).length} delta={`${(data.applications || []).filter((item) => item.status === "new").length} new`} />
         </section>
         <div className="staff-grid">
           <section className="staff-card">
@@ -3103,6 +3222,24 @@ function StaffPanel({ notify }) {
                 </div>
               </div>
             )) : <p className="muted">No takedown reports.</p>}
+          </section>
+          <section className="staff-card">
+            <SectionTitle title="Career applications" />
+            {(data.applications || []).length ? data.applications.map((application) => (
+              <div className="staff-ticket career-application-row" key={application.id}>
+                <b>{application.name}<small>{application.role} - {application.email}</small></b>
+                <p>{application.experience}</p>
+                <small>{application.availability || "Availability not specified"}</small>
+                {application.links && <a href={application.links} target="_blank" rel="noreferrer">Links <ExternalLink size={14} /></a>}
+                <select value={application.status} onChange={(event) => applicationStatus(application.id, event.target.value)}>
+                  <option value="new">new</option>
+                  <option value="review">review</option>
+                  <option value="interview">interview</option>
+                  <option value="accepted">accepted</option>
+                  <option value="rejected">rejected</option>
+                </select>
+              </div>
+            )) : <p className="muted">No career applications yet.</p>}
           </section>
         </div>
       </div>
@@ -3989,13 +4126,30 @@ function ReleaseComments({ release, initialComments, notify }) {
 
 function UploadPage({ notify }) {
   const { user } = useAuth();
+  const uploadKinds = [
+    { id: "Track", title: "One track", text: "Single audio file with its own page." },
+    { id: "EP", title: "Several tracks", text: "EP or small pack with multiple files." },
+    { id: "Dubpack", title: "Dubpack", text: "Pack for DJs, edits or private drops." }
+  ];
+  const [step, setStep] = useState(1);
   const [form, setForm] = useState({ title: "", kind: "Track", genre: "Tech House", tracks: 1, duration: "06:00", price: 8, free: false, download_enabled: true, gate_actions: [], gate: "No gate", description: "", rights_confirmed: false, rights_owner: "", visibility: "public" });
   const [file, setFile] = useState(null);
+  const [audioFiles, setAudioFiles] = useState([]);
   const [coverFile, setCoverFile] = useState(null);
   const [error, setError] = useState("");
   const { data: copyrightConfig } = useData("/copyright/config", []);
   if (!user) return <AuthRequired />;
   const update = (key, value) => setForm((current) => ({ ...current, [key]: value }));
+  const chooseKind = (kind) => {
+    setForm((current) => ({ ...current, kind, tracks: kind === "Track" ? 1 : Math.max(2, Number(current.tracks) || 2) }));
+    setStep(2);
+  };
+  const nextStep = () => {
+    setError("");
+    if (step === 2 && !file) return setError("Ajoute au moins un fichier audio avant de continuer.");
+    if (step === 3 && !form.title.trim()) return setError("Ajoute un titre avant de continuer.");
+    setStep((current) => Math.min(4, current + 1));
+  };
   const toggleGate = (action) => setForm((current) => {
     const gateActions = current.gate_actions.includes(action)
       ? current.gate_actions.filter((item) => item !== action)
@@ -4011,14 +4165,25 @@ function UploadPage({ notify }) {
     setError("");
     try {
       if (!file) throw new Error("Ajoute un fichier audio avant publication.");
-      const uploadedAudio = await uploadAudio(file);
+      const selectedAudioFiles = audioFiles.length ? audioFiles : [file];
+      const uploadedTracks = await Promise.all(selectedAudioFiles.map((audioFile) => uploadAudio(audioFile)));
+      const uploadedAudio = uploadedTracks[0];
       const uploadedCover = coverFile ? await uploadImage(coverFile) : null;
       const payload = {
         ...form,
+        tracks: form.kind === "Track" ? 1 : Math.max(Number(form.tracks) || 1, uploadedTracks.length),
         audio_url: uploadedAudio.url,
         audio_file_name: uploadedAudio.name,
         audio_mime: uploadedAudio.mime,
         audio_size: uploadedAudio.size,
+        track_files: uploadedTracks.map((track, index) => ({
+          index: index + 1,
+          name: track.name,
+          url: track.url,
+          mime: track.mime,
+          size: track.size,
+          preview_seconds: track.preview_seconds || 45
+        })),
         cover_url: uploadedCover?.url || "",
         gate_actions: form.download_enabled ? form.gate_actions : [],
         gate: form.download_enabled ? form.gate : "Downloads disabled"
@@ -4039,59 +4204,13 @@ function UploadPage({ notify }) {
     <main className="page narrow">
       <PageHeader eyebrow="New release" title="Upload a track, EP or dubpack." text="Metadata is saved to the production database and appears after rights checks pass." />
       <form className="form-card" onSubmit={submit}>
-        <FileUploadPanel file={file} setFile={setFile} notify={notify} onDurationChange={(seconds) => update("duration", formatDuration(seconds))} />
-        <ImageUploadPanel file={coverFile} setFile={setCoverFile} title="Cover artwork" text="Upload a square JPG, PNG or WebP cover for this release." defaultWidth={1400} defaultHeight={1400} />
-        <label>Track title<input value={form.title} onChange={(e) => update("title", e.target.value)} placeholder="e.g. Your release title" required /></label>
-        <div className="form-grid">
-          <label>Type<select value={form.kind} onChange={(e) => update("kind", e.target.value)}><option>Track</option><option>EP</option><option>Dubpack</option></select></label>
-          <label>Genre<select value={form.genre} onChange={(e) => update("genre", e.target.value)}><option>Tech House</option><option>Techno</option><option>Melodic</option><option>Afro House</option><option>Drum & Bass</option><option>Hard Techno</option><option>Riddim</option><option>Dubstep</option></select></label>
-          <label>Tracks<input type="number" min="1" value={form.tracks} onChange={(e) => update("tracks", e.target.value)} /></label>
-          <label>Duration<input value={form.duration} onChange={(e) => update("duration", e.target.value)} /></label>
-        </div>
-        <label>Visibility<select value={form.visibility} onChange={(e) => update("visibility", e.target.value)}><option value="public">Public</option><option value="unlisted">Unlisted</option><option value="private">Private</option></select></label>
-        <div className="segmented">
-          <button type="button" className={form.free ? "active" : ""} onClick={() => update("free", true)}>Free</button>
-          <button type="button" className={!form.free ? "active" : ""} onClick={() => update("free", false)}>Fixed price</button>
-        </div>
-        {!form.free && <label>Price EUR<input type="number" min="1" value={form.price} onChange={(e) => update("price", e.target.value)} /></label>}
-        <section className="download-gate-builder">
-          <div className="gate-builder-head">
-            <div>
-              <span className="eyebrow">Download gateway</span>
-              <h3>Choose fan actions before download.</h3>
-              <p>Build a clean Hypeddit-style gate: fans complete selected actions, then the WAV unlocks.</p>
-            </div>
-            <strong>{form.download_enabled ? `${form.gate_actions.length} action${form.gate_actions.length > 1 ? "s" : ""}` : "Stream only"}</strong>
-          </div>
-          <label className="check-line gate-download-toggle">
-            <input type="checkbox" checked={form.download_enabled} onChange={(e) => update("download_enabled", e.target.checked)} />
-            <span><b>Enable downloadable WAV</b><small>Turn off for stream-only releases.</small></span>
-          </label>
-          {form.download_enabled ? (
-            <div className="gate-action-grid">
-              {DOWNLOAD_GATE_ACTIONS.map((action) => (
-                <button type="button" className={form.gate_actions.includes(action.id) ? "selected" : ""} onClick={() => toggleGate(action.id)} key={action.id}>
-                  <GateActionIcon action={action.id} />
-                  <span>
-                    <b>{action.label}</b>
-                    <small>{action.description}</small>
-                  </span>
-                  {form.gate_actions.includes(action.id) && <Check size={16} />}
-                </button>
-              ))}
-            </div>
-          ) : <p className="muted">Stream-only mode: buy/listen pages stay live, WAV download stays hidden.</p>}
-          {form.download_enabled && (
-            <div className="gate-summary">
-              <ShieldCheck size={16} />
-              <span>{form.gate_actions.length ? `Fans must complete: ${form.gate_actions.map(gateActionLabel).join(" + ")}.` : "No action selected: the WAV button unlocks instantly after login."}</span>
-            </div>
-          )}
-        </section>
-        <label>Description<textarea value={form.description} onChange={(e) => update("description", e.target.value)} placeholder="Describe the release..." /></label>
-        <CopyrightCompliancePanel form={form} update={update} config={copyrightConfig} />
+        <div className="upload-stepper">{[1, 2, 3, 4].map((item) => <button type="button" key={item} className={step === item ? "active" : ""} onClick={() => setStep(item)}><span>{item}</span></button>)}</div>
+        {step === 1 && <section className="upload-step-card"><h2>Choose release format</h2><div className="upload-kind-grid">{uploadKinds.map((item) => <button type="button" className={form.kind === item.id ? "selected" : ""} key={item.id} onClick={() => chooseKind(item.id)}><b>{item.title}</b><small>{item.text}</small></button>)}</div></section>}
+        {step === 2 && <section className="upload-step-card"><h2>Upload audio and artwork</h2><FileUploadPanel file={file} files={audioFiles} setFiles={(nextFiles) => { setAudioFiles(nextFiles); setFile(nextFiles[0] || null); update("tracks", form.kind === "Track" ? 1 : Math.max(1, nextFiles.length)); }} setFile={setFile} notify={notify} multiple={form.kind !== "Track"} onDurationChange={(seconds) => update("duration", formatDuration(seconds))} /><ImageUploadPanel file={coverFile} setFile={setCoverFile} title="Cover artwork" text="Upload a square JPG, PNG or WebP cover for this release." defaultWidth={1400} defaultHeight={1400} /></section>}
+        {step === 3 && <section className="upload-step-card"><h2>Release details</h2><label>Track title<input value={form.title} onChange={(e) => update("title", e.target.value)} placeholder="e.g. Your release title" required /></label><div className="form-grid"><label>Type<select value={form.kind} onChange={(e) => update("kind", e.target.value)}><option>Track</option><option>EP</option><option>Dubpack</option></select></label><label>Genre<select value={form.genre} onChange={(e) => update("genre", e.target.value)}><option>Tech House</option><option>Techno</option><option>Melodic</option><option>Afro House</option><option>Drum & Bass</option><option>Hard Techno</option><option>Riddim</option><option>Dubstep</option></select></label><label>Tracks<input type="number" min="1" value={form.tracks} onChange={(e) => update("tracks", e.target.value)} /></label><label>Duration<input value={form.duration} onChange={(e) => update("duration", e.target.value)} /></label></div><label>Visibility<select value={form.visibility} onChange={(e) => update("visibility", e.target.value)}><option value="public">Public</option><option value="unlisted">Unlisted</option><option value="private">Private</option></select></label><label>Description<textarea value={form.description} onChange={(e) => update("description", e.target.value)} placeholder="Describe the release..." /></label></section>}
+        {step === 4 && <section className="upload-step-card"><h2>Pricing, access and rights</h2><div className="segmented"><button type="button" className={form.free ? "active" : ""} onClick={() => update("free", true)}>Free</button><button type="button" className={!form.free ? "active" : ""} onClick={() => update("free", false)}>Fixed price</button></div>{!form.free && <div className="secure-preview-note"><ShieldCheck size={16} /><span>Paid releases only expose a signed 45-second preview. The full audio stays private until checkout/download rules allow access.</span></div>}{!form.free && <label>Price EUR<input type="number" min="1" value={form.price} onChange={(e) => update("price", e.target.value)} /></label>}<section className="download-gate-builder"><div className="gate-builder-head"><div><span className="eyebrow">Download gateway</span><h3>Choose fan actions before download.</h3><p>Build a clean gate: fans complete selected actions, then the WAV unlocks.</p></div><strong>{form.download_enabled ? `${form.gate_actions.length} action${form.gate_actions.length > 1 ? "s" : ""}` : "Stream only"}</strong></div><label className="check-line gate-download-toggle"><input type="checkbox" checked={form.download_enabled} onChange={(e) => update("download_enabled", e.target.checked)} /><span><b>Enable downloadable WAV</b><small>Turn off for stream-only releases.</small></span></label>{form.download_enabled ? <div className="gate-action-grid">{DOWNLOAD_GATE_ACTIONS.map((action) => <button type="button" className={form.gate_actions.includes(action.id) ? "selected" : ""} onClick={() => toggleGate(action.id)} key={action.id}><GateActionIcon action={action.id} /><span><b>{action.label}</b><small>{action.description}</small></span>{form.gate_actions.includes(action.id) && <Check size={16} />}</button>)}</div> : <p className="muted">Stream-only mode: buy/listen pages stay live, WAV download stays hidden.</p>}{form.download_enabled && <div className="gate-summary"><ShieldCheck size={16} /><span>{form.gate_actions.length ? `Fans must complete: ${form.gate_actions.map(gateActionLabel).join(" + ")}.` : "No action selected: the WAV button unlocks instantly after login."}</span></div>}</section><CopyrightCompliancePanel form={form} update={update} config={copyrightConfig} /></section>}
         {error && <p className="error">{error}</p>}
-        <button className="button accent" type="submit"><Upload size={17} /> Publish release</button>
+        <div className="upload-step-actions">{step > 1 && <button className="button ghost" type="button" onClick={() => setStep((current) => Math.max(1, current - 1))}>Back</button>}{step < 4 ? <button className="button accent" type="button" onClick={nextStep}>Continue</button> : <button className="button accent" type="submit"><Upload size={17} /> Publish release</button>}</div>
       </form>
     </main>
   );
@@ -4113,11 +4232,10 @@ function CopyrightCompliancePanel({ form, update, config }) {
         <span>I confirm I own the rights to this audio or have a valid license to publish, share and sell it on Undiscover.</span>
       </label>
       <div className="scan-policy-grid">
-        <span><b>{config?.provider || "off"}</b> scan provider</span>
+        <span><b>Active</b> rights check</span>
         <span><b>{config?.review_threshold || 45}%</b> review threshold</span>
         <span><b>{config?.block_threshold || 80}%</b> auto-block threshold</span>
       </div>
-      <p className="copyright-note">For production, set COPYRIGHT_SCAN_PROVIDER to AudD or ACRCloud and keep the takedown address active: {config?.takedown_email || "copyright@undisc0ver.com"}.</p>
     </section>
   );
 }
@@ -4159,13 +4277,17 @@ function TakedownReportForm({ release, notify }) {
   );
 }
 
-function FileUploadPanel({ file, setFile, notify, onDurationChange }) {
+function FileUploadPanel({ file, files = [], setFiles, setFile, notify, onDurationChange, multiple = false }) {
   const fileInputId = useId();
   const [progress, setProgress] = useState(0);
-  const readableSize = file ? `${Math.max(file.size / 1024 / 1024, 0.01).toFixed(1)} MB` : "";
+  const selectedFiles = files.length ? files : (file ? [file] : []);
+  const primaryFile = selectedFiles[0] || null;
+  const readableSize = primaryFile ? `${Math.max(primaryFile.size / 1024 / 1024, 0.01).toFixed(1)} MB` : "";
   const chooseFile = async (event) => {
-    const nextFile = event.target.files?.[0] || null;
-    setFile(nextFile);
+    const nextFiles = Array.from(event.target.files || []);
+    const nextFile = nextFiles[0] || null;
+    setFiles?.(multiple ? nextFiles : nextFiles.slice(0, 1));
+    setFile?.(nextFile);
     if (!nextFile) return;
     try {
       const seconds = await getAudioFileDuration(nextFile);
@@ -4175,7 +4297,7 @@ function FileUploadPanel({ file, setFile, notify, onDurationChange }) {
     }
   };
   useEffect(() => {
-    if (!file) {
+    if (!primaryFile) {
       setProgress(0);
       return undefined;
     }
@@ -4183,25 +4305,34 @@ function FileUploadPanel({ file, setFile, notify, onDurationChange }) {
     const steps = [36, 58, 77, 100];
     const timers = steps.map((value, index) => setTimeout(() => setProgress(value), 260 * (index + 1)));
     return () => timers.forEach(clearTimeout);
-  }, [file]);
+  }, [primaryFile]);
+  const removeFile = (index) => {
+    const nextFiles = selectedFiles.filter((_, fileIndex) => fileIndex !== index);
+    setFiles?.(nextFiles);
+    setFile?.(nextFiles[0] || null);
+  };
   return (
     <section className="file-upload-card">
-      <h3>Audio file upload</h3>
+      <h3>{multiple ? "Upload audio files" : "Upload audio file"}</h3>
       <label className="file-dropzone" htmlFor={fileInputId}>
         <Upload size={26} />
-        <span>Drag and drop or choose file to upload</span>
-        <input id={fileInputId} type="file" accept=".wav,.mp3,.aiff,.aif,audio/*" onChange={chooseFile} />
+        <span>{multiple ? "Choose several tracks for this pack" : "Drag and drop or choose file to upload"}</span>
+        <input id={fileInputId} type="file" multiple={multiple} accept=".wav,.mp3,.aiff,.aif,audio/*" onChange={chooseFile} />
       </label>
       <p>Recommended max. size: 500 MB. Accepted file types: WAV, MP3, AIFF.</p>
-      {file ? (
-        <div className="uploaded-file transfer-item">
-          <span>{progress < 100 ? <Loader2 className="spin" size={20} /> : <File size={20} />}</span>
-          <div>
-            <strong>{file.name}</strong>
-            <small>{readableSize} - {progress < 100 ? "Processing audio" : "Ready"}</small>
-            <i className="transfer-progress"><b style={{ width: `${progress}%` }} /></i>
-          </div>
-          <button type="button" onClick={() => setFile(null)} aria-label="Remove file"><Trash size={16} /></button>
+      {selectedFiles.length ? (
+        <div className="upload-track-list">
+          {selectedFiles.map((trackFile, index) => (
+            <div className="uploaded-file transfer-item" key={`${trackFile.name}-${trackFile.size}-${index}`}>
+              <span>{progress < 100 && index === 0 ? <Loader2 className="spin" size={20} /> : <File size={20} />}</span>
+              <div>
+                <strong>{trackFile.name}</strong>
+                <small>{`${Math.max(trackFile.size / 1024 / 1024, 0.01).toFixed(1)} MB`} - {index === 0 && progress < 100 ? "Processing audio" : "Ready"}</small>
+                {index === 0 && <i className="transfer-progress"><b style={{ width: `${progress}%` }} /></i>}
+              </div>
+              <button type="button" onClick={() => removeFile(index)} aria-label="Remove file"><Trash size={16} /></button>
+            </div>
+          ))}
         </div>
       ) : (
         <div className="uploaded-file muted-file">
@@ -4219,7 +4350,18 @@ async function editImageFile(file, options) {
   try {
     const image = new Image();
     image.src = imageUrl;
-    await image.decode();
+    try {
+      await image.decode();
+    } catch {
+      await new Promise((resolve, reject) => {
+        if (image.complete && image.naturalWidth) {
+          resolve();
+          return;
+        }
+        image.onload = resolve;
+        image.onerror = reject;
+      });
+    }
     const width = Math.max(64, Number(options.width) || image.naturalWidth);
     const height = Math.max(64, Number(options.height) || image.naturalHeight);
     const zoom = Math.max(1, Number(options.zoom) || 1);
@@ -4235,6 +4377,7 @@ async function editImageFile(file, options) {
     const y = (height - drawHeight) / 2 + (Number(options.panY) || 0);
     ctx.drawImage(image, x, y, drawWidth, drawHeight);
     const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/webp", .92));
+    if (!blob) throw new Error("Image export failed.");
     const name = file.name.replace(/\.[^.]+$/, "") || "image";
     return new File([blob], `${name}-${width}x${height}.webp`, { type: "image/webp" });
   } finally {
@@ -4249,6 +4392,7 @@ function ImageUploadPanel({ file, setFile, title = "Image upload", text = "Uploa
   const [sourceFile, setSourceFile] = useState(null);
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
   const [settings, setSettings] = useState({ width: defaultWidth, height: defaultHeight, zoom: 1, panX: 0, panY: 0 });
   const [preview, setPreview] = useState("");
   useEffect(() => {
@@ -4296,6 +4440,7 @@ function ImageUploadPanel({ file, setFile, title = "Image upload", text = "Uploa
     setSourceFile(nextFile);
     setFile(nextFile);
     setEditing(!!nextFile);
+    setError("");
     resetSettings();
   };
   const stopDrag = () => {
@@ -4320,9 +4465,10 @@ function ImageUploadPanel({ file, setFile, title = "Image upload", text = "Uploa
     window.addEventListener("pointerup", stopDrag);
   };
   useEffect(() => () => stopDrag(), []);
-  const applyEdit = async () => {
+  const saveImage = async () => {
     if (!sourceFile && !file) return;
     setBusy(true);
+    setError("");
     try {
       const rect = cropRef.current?.getBoundingClientRect();
       const panScaleX = rect?.width ? Number(settings.width) / rect.width : 1;
@@ -4332,8 +4478,12 @@ function ImageUploadPanel({ file, setFile, title = "Image upload", text = "Uploa
         panX: (Number(settings.panX) || 0) * panScaleX,
         panY: (Number(settings.panY) || 0) * panScaleY
       };
-      setFile(await editImageFile(sourceFile || file, outputSettings));
+      const editedFile = await editImageFile(sourceFile || file, outputSettings);
+      setSourceFile(editedFile);
+      setFile(editedFile);
       setEditing(false);
+    } catch {
+      setError("Image save failed. Try another image.");
     } finally {
       setBusy(false);
     }
@@ -4342,6 +4492,7 @@ function ImageUploadPanel({ file, setFile, title = "Image upload", text = "Uploa
     setSourceFile(null);
     setFile(null);
     setEditing(false);
+    setError("");
   };
   return (
     <section className="file-upload-card image-upload-card">
@@ -4376,12 +4527,13 @@ function ImageUploadPanel({ file, setFile, title = "Image upload", text = "Uploa
             <label>Width<input type="number" min="64" max="4000" value={settings.width} onChange={(e) => updateSetting("width", e.target.value)} /></label>
             <label>Height<input type="number" min="64" max="4000" value={settings.height} onChange={(e) => updateSetting("height", e.target.value)} /></label>
             <label>Zoom<input type="range" min="1" max="4" step=".05" value={settings.zoom} onChange={(e) => updateZoom(e.target.value)} /></label>
-            <button className="button accent" type="button" onClick={applyEdit} disabled={busy}>{busy ? <Loader2 className="spin" size={16} /> : <Settings size={16} />} Apply crop</button>
+            <button className="button accent" type="button" onClick={saveImage} disabled={busy}>{busy ? <Loader2 className="spin" size={16} /> : <Check size={16} />} Save image</button>
             <button className="button ghost" type="button" onClick={resetSettings}>Reset</button>
           </div>
+          {error && <p className="image-edit-error">{error}</p>}
         </div>
       )}
-      {file && !editing && <button className="button ghost" type="button" onClick={() => { setSourceFile(file); setEditing(true); }}><Settings size={16} /> Edit crop</button>}
+      {file && !editing && <button className="button ghost" type="button" onClick={() => { setSourceFile(file); setError(""); setEditing(true); }}><Settings size={16} /> Edit crop</button>}
       {file && <button className="button ghost" type="button" onClick={removeImage}><Trash size={16} /> Remove image</button>}
     </section>
   );
@@ -4987,6 +5139,8 @@ function CampaignManager({ releases, notify }) {
 }
 
 function DashboardHero({ user, stats }) {
+  const availableBalance = Number(stats.available_balance ?? stats.revenue ?? 0);
+  const delta = deltaLabel(stats.revenue_last_7_days, stats.revenue_previous_7_days);
   return (
     <section className="dashboard-hero">
       <div>
@@ -5001,8 +5155,8 @@ function DashboardHero({ user, stats }) {
       <aside>
         <BrandMark className="mini-icon" label="Undiscover" />
         <small>Available balance</small>
-        <strong>{money(stats.revenue)}</strong>
-        <em>+18% vs last week</em>
+        <strong>{balanceMoney(availableBalance)}</strong>
+        <em className={percentDelta(stats.revenue_last_7_days, stats.revenue_previous_7_days) < 0 ? "negative" : ""}>{delta}</em>
       </aside>
     </section>
   );
@@ -5025,7 +5179,7 @@ function Dashboard({ section, notify, playRelease }) {
         <div className="dashboard-content">
           <DashboardHero user={user} stats={stats} />
           <section className="dashboard-kpi-grid">
-            <Metric icon={<Wallet />} label="Revenue" value={money(stats.revenue)} delta={`${shortNumber(stats.sales || 0)} sales`} />
+            <Metric icon={<Wallet />} label="Revenue" value={balanceMoney(stats.revenue)} delta={`${shortNumber(stats.sales || 0)} sales`} />
             <Metric icon={<BarChart3 />} label="Plays" value={shortNumber(stats.plays)} delta={`${shortNumber(releases.length)} releases`} />
             <Metric icon={<ArrowDownToLine />} label="Downloads" value={shortNumber(stats.downloads)} delta={`${shortNumber(stats.comments || 0)} comments`} />
             <Metric icon={<UserPlus />} label="Followers" value={shortNumber(stats.followers)} delta="live count" />
@@ -5377,15 +5531,22 @@ function DownloadButton({ release, notify, compact = false }) {
     if (!user) return location.hash = "#/login";
     setDownloading(true);
     try {
-      const data = await request(`/releases/${release.id}/download`, { method: "POST" });
-      if (data.url) {
-        const link = document.createElement("a");
-        link.href = data.url;
-        link.download = data.file_name || release.audio_file_name || `${release.title}.wav`;
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
+      const res = await fetch(`${API}/releases/${release.id}/download`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${localStorage.getItem("undiscover_token")}` }
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Download failed.");
       }
+      const blob = await res.blob();
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = release.audio_file_name || `${release.title}.wav`;
+      document.body.appendChild(link);
+      link.click();
+      URL.revokeObjectURL(link.href);
+      link.remove();
       notify("Download unlocked and counted.");
     } catch (err) {
       notify(err.message);
@@ -5420,9 +5581,10 @@ function FollowButton({ artistId, notify }) {
 }
 
 function ArtistCard({ artist, notify }) {
+  const logo = [artist.logo_url, artist.avatar_url].find((src) => isImageAvatar(src));
   return (
     <article className="card artist-card">
-      <span className="avatar">{artist.avatar}</span>
+      <span className="avatar artist-card-avatar">{logo ? <img src={logo} alt="" /> : artist.avatar}</span>
       <div>
         <h2>
           <a href={artistPath(artist)}>{artist.name}</a>
@@ -5565,7 +5727,8 @@ function Analytics({ releases, stats }) {
 }
 
 function Payouts({ stats, notify }) {
-  return <section className="card payouts"><Wallet size={32} /><h2>{money(stats.revenue)} available</h2><p className="muted">Payout ledger from completed purchases.</p><button className="button accent" onClick={() => notify("Payout request queued.")}>Request payout</button></section>;
+  const availableBalance = Number(stats.available_balance ?? stats.revenue ?? 0);
+  return <section className="card payouts"><Wallet size={32} /><h2>{balanceMoney(availableBalance)} available</h2><p className="muted">Payout ledger from completed purchases.</p><button className="button accent" onClick={() => notify("Payout request queued.")}>Request payout</button></section>;
 }
 
 function PageHeader({ eyebrow, title, text }) {

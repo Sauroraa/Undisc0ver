@@ -1,7 +1,7 @@
 import express from "express";
 import multer from "multer";
 import crypto from "node:crypto";
-import { existsSync, mkdirSync } from "node:fs";
+import { createReadStream, existsSync, mkdirSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { db, hashPassword, id, initDb, publicUser, verifyPassword } from "./db.js";
@@ -52,7 +52,7 @@ function cents(value) {
 }
 
 const scanConfig = {
-  provider: process.env.COPYRIGHT_SCAN_PROVIDER || (process.env.NODE_ENV === "production" ? "off" : "local"),
+  provider: process.env.COPYRIGHT_SCAN_PROVIDER || (process.env.NODE_ENV === "production" ? "manual" : "local"),
   takedownEmail: process.env.COPYRIGHT_TAKEDOWN_EMAIL || "copyright@undisc0ver.com",
   blockThreshold: Number(process.env.COPYRIGHT_BLOCK_THRESHOLD || 80),
   reviewThreshold: Number(process.env.COPYRIGHT_REVIEW_THRESHOLD || 45)
@@ -136,6 +136,62 @@ function authRedirect(params = {}) {
   return `${siteUrl}/#/auth/google-callback${query ? `?${query}` : ""}`;
 }
 
+function audioToken(filename = "", purpose = "preview") {
+  return crypto.createHmac("sha256", googleAuth.stateSecret).update(`${purpose}:${filename}`).digest("base64url");
+}
+
+function verifyAudioToken(filename = "", purpose = "preview", token = "") {
+  const expected = audioToken(filename, purpose);
+  if (!token || Buffer.byteLength(token) !== Buffer.byteLength(expected)) return false;
+  return crypto.timingSafeEqual(Buffer.from(token), Buffer.from(expected));
+}
+
+function storageNameFromAudioUrl(value = "") {
+  const match = String(value).match(/\/api\/audio\/(?:preview|stream)\/([^?]+)/) || String(value).match(/\/uploads\/([^?]+)/);
+  return match ? decodeURIComponent(match[1]) : "";
+}
+
+function safeUploadPath(filename = "") {
+  if (!filename || filename.includes("..")) return "";
+  const filePath = resolve(uploadDir, filename);
+  if (!filePath.startsWith(`${uploadDir}${process.platform === "win32" ? "\\" : "/"}`) && filePath !== uploadDir) return "";
+  return filePath;
+}
+
+function audioMimeFromName(filename = "") {
+  if (/\.wav$/i.test(filename)) return "audio/wav";
+  if (/\.aiff?$/i.test(filename)) return "audio/aiff";
+  if (/\.flac$/i.test(filename)) return "audio/flac";
+  if (/\.m4a$/i.test(filename)) return "audio/mp4";
+  if (/\.ogg$/i.test(filename)) return "audio/ogg";
+  return "audio/mpeg";
+}
+
+function streamAudioFile(req, res, filePath, { mime = "audio/mpeg", fileName = "audio.wav", preview = false } = {}) {
+  if (!filePath || !existsSync(filePath)) return res.status(404).json({ error: "Fichier audio introuvable." });
+  const size = statSync(filePath).size;
+  const maxPreviewBytes = preview ? Math.min(size, Math.max(384 * 1024, Math.floor(size * .18))) : size;
+  const range = req.headers.range;
+  let start = 0;
+  let end = maxPreviewBytes - 1;
+  if (range) {
+    const match = range.match(/bytes=(\d+)-(\d*)/);
+    if (match) {
+      start = Math.min(Number(match[1]) || 0, maxPreviewBytes - 1);
+      end = match[2] ? Math.min(Number(match[2]), maxPreviewBytes - 1) : Math.min(start + (1024 * 1024) - 1, maxPreviewBytes - 1);
+    }
+  }
+  res.status(range ? 206 : 200);
+  res.setHeader("Content-Type", mime || "application/octet-stream");
+  res.setHeader("Accept-Ranges", "bytes");
+  res.setHeader("Content-Length", Math.max(0, end - start + 1));
+  res.setHeader("Content-Range", `bytes ${start}-${end}/${maxPreviewBytes}`);
+  res.setHeader("Cache-Control", preview ? "private, max-age=300" : "private, no-store");
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  if (!preview) res.setHeader("Content-Disposition", `attachment; filename="${String(fileName).replace(/"/g, "")}"`);
+  createReadStream(filePath, { start, end }).pipe(res);
+}
+
 async function fetchGoogleProfile(code) {
   const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
@@ -198,6 +254,8 @@ function scanCopyright({ title = "", artist = "", description = "" }) {
     match_title: "",
     notes: scanConfig.provider === "local"
       ? "Local metadata scan passed. Configure AudD or ACRCloud for production fingerprinting."
+      : scanConfig.provider === "manual"
+        ? "Manual rights review policy passed."
       : "No match returned by the configured provider."
   };
 }
@@ -245,6 +303,26 @@ function releaseSelect(where = "", order = "r.plays DESC") {
     ${where}
     ORDER BY ${order}
   `;
+}
+
+function audioAccessUrl(release = {}) {
+  const storageName = storageNameFromAudioUrl(release.audio_url);
+  if (!storageName) return release.audio_url || "";
+  const purpose = release.free ? "stream" : "preview";
+  return `/api/audio/${purpose}/${encodeURIComponent(storageName)}?token=${audioToken(storageName, purpose)}`;
+}
+
+function presentRelease(release) {
+  if (!release) return release;
+  return {
+    ...release,
+    audio_url: audioAccessUrl(release),
+    preview_seconds: release.free ? null : 45
+  };
+}
+
+function presentReleases(releases = []) {
+  return releases.map(presentRelease);
 }
 
 function optionalUserId(req) {
@@ -373,8 +451,12 @@ app.post("/api/auth/logout", auth, (req, res) => {
   res.json({ ok: true });
 });
 
-app.use("/uploads", express.static(uploadDir, {
+app.use("/uploads", (req, res, next) => {
+  if (/\.(wav|mp3|aiff?|flac|m4a|ogg)$/i.test(req.path)) return res.status(404).json({ error: "Audio protected." });
+  next();
+}, express.static(uploadDir, {
   fallthrough: false,
+  dotfiles: "deny",
   setHeaders(res) {
     res.setHeader("X-Content-Type-Options", "nosniff");
   }
@@ -382,13 +464,36 @@ app.use("/uploads", express.static(uploadDir, {
 
 app.post("/api/uploads/audio", auth, audioUpload.single("audio"), (req, res) => {
   if (!req.file) return res.status(400).json({ error: "Fichier audio requis." });
+  const token = audioToken(req.file.filename, "preview");
   res.json({
     file: {
-      url: `/uploads/${req.file.filename}`,
+      url: `/api/audio/preview/${encodeURIComponent(req.file.filename)}?token=${token}`,
       name: req.file.originalname,
       mime: req.file.mimetype,
-      size: req.file.size
+      size: req.file.size,
+      storage_name: req.file.filename,
+      preview_seconds: 45
     }
+  });
+});
+
+app.get("/api/audio/preview/:filename", (req, res) => {
+  const filename = req.params.filename;
+  if (!verifyAudioToken(filename, "preview", String(req.query.token || ""))) return res.status(403).json({ error: "Preview token invalide." });
+  streamAudioFile(req, res, safeUploadPath(filename), {
+    mime: audioMimeFromName(filename),
+    fileName: filename,
+    preview: true
+  });
+});
+
+app.get("/api/audio/stream/:filename", (req, res) => {
+  const filename = req.params.filename;
+  if (!verifyAudioToken(filename, "stream", String(req.query.token || ""))) return res.status(403).json({ error: "Stream token invalide." });
+  streamAudioFile(req, res, safeUploadPath(filename), {
+    mime: audioMimeFromName(filename),
+    fileName: filename,
+    preview: false
   });
 });
 
@@ -410,7 +515,7 @@ app.get("/api/releases", (req, res) => {
   const rows = genre && genre !== "All"
     ? db.prepare(releaseSelect(`WHERE (r.title LIKE ? OR u.name LIKE ?) AND r.genre = ? AND ${publicReleaseWhere("r")}`)).all(q, q, genre)
     : db.prepare(releaseSelect(`WHERE (r.title LIKE ? OR u.name LIKE ?) AND ${publicReleaseWhere("r")}`)).all(q, q);
-  res.json({ releases: rows });
+  res.json({ releases: presentReleases(rows) });
 });
 
 app.get("/api/releases/:id", (req, res) => {
@@ -428,7 +533,7 @@ app.get("/api/releases/:id", (req, res) => {
     ORDER BY rc.created_at DESC
     LIMIT 50
   `).all(req.params.id);
-  res.json({ release: fresh, comments });
+  res.json({ release: presentRelease(fresh), comments });
 });
 
 function normalizeGateActions(actions = []) {
@@ -440,7 +545,7 @@ function normalizeGateActions(actions = []) {
 }
 
 app.post("/api/releases", auth, (req, res) => {
-  const { title, kind, genre, tracks, duration, price, free, gate, gate_actions = [], description, rights_confirmed, rights_owner, download_enabled = true, audio_url = "", audio_file_name = "", audio_mime = "", audio_size = 0, cover_url = "", visibility = "public" } = req.body;
+  const { title, kind, genre, tracks, duration, price, free, gate, gate_actions = [], description, rights_confirmed, rights_owner, download_enabled = true, audio_url = "", audio_file_name = "", audio_mime = "", audio_size = 0, track_files = [], cover_url = "", visibility = "public" } = req.body;
   if (!title || !kind || !genre) return res.status(400).json({ error: "Titre, type et genre sont requis." });
   if (!audio_url) return res.status(400).json({ error: "Upload audio requis avant publication." });
   if (!rights_confirmed) return res.status(400).json({ error: "Confirmation des droits requise avant publication." });
@@ -454,8 +559,8 @@ app.post("/api/releases", auth, (req, res) => {
   const moderationStatus = moderationFromScan(scan);
   const releaseVisibility = ["public", "private", "unlisted"].includes(String(visibility).toLowerCase()) ? String(visibility).toLowerCase() : "public";
   db.prepare(`INSERT INTO releases (id, user_id, title, kind, genre, tracks, duration, price_cents, free, gate, gate_actions, description, color, download_enabled,
-      rights_confirmed, rights_owner, scan_status, scan_provider, scan_score, scan_match_title, scan_notes, moderation_status, audio_url, audio_file_name, audio_mime, audio_size, cover_url, visibility)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      rights_confirmed, rights_owner, scan_status, scan_provider, scan_score, scan_match_title, scan_notes, moderation_status, audio_url, audio_file_name, audio_mime, audio_size, track_files, cover_url, visibility)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
     .run(
       releaseId,
       req.user.id,
@@ -483,13 +588,14 @@ app.post("/api/releases", auth, (req, res) => {
       String(audio_file_name || ""),
       String(audio_mime || ""),
       Number(audio_size) || 0,
+      JSON.stringify(Array.isArray(track_files) ? track_files.slice(0, 30) : []),
       String(cover_url || ""),
       releaseVisibility
     );
   db.prepare("INSERT INTO copyright_scans (id, release_id, provider, status, score, match_title, raw_json) VALUES (?, ?, ?, ?, ?, ?, ?)")
     .run(id("scan"), releaseId, scan.provider, scan.status, scan.score, scan.match_title, JSON.stringify(scan));
   const release = db.prepare(releaseSelect("WHERE r.id = ?", "r.created_at DESC")).get(releaseId);
-  res.json({ release, scan });
+  res.json({ release: presentRelease(release), scan });
 });
 
 app.post("/api/releases/:id/report", (req, res) => {
@@ -591,12 +697,12 @@ app.get("/api/discover", (req, res) => {
     LIMIT 8
   `).all();
   res.json({
-    recent,
-    recommended,
+    recent: presentReleases(recent),
+    recommended: presentReleases(recommended),
     trending_genres: trendingGenres,
     boosted,
     suggested_artists: suggestedArtists,
-    new_releases: allReleases.slice(0, 12)
+    new_releases: presentReleases(allReleases.slice(0, 12))
   });
 });
 
@@ -627,7 +733,7 @@ app.get("/api/charts", (req, res) => {
   };
   const order = orderMap[type] || orderMap.top100;
   const releases = db.prepare(releaseSelect(`WHERE ${publicReleaseWhere("r")} ${genreWhere}`, order)).all(...params).slice(0, 100);
-  res.json({ releases });
+  res.json({ releases: presentReleases(releases) });
 });
 
 function requiredGateActions(release) {
@@ -688,8 +794,12 @@ app.post("/api/releases/:id/download", auth, (req, res) => {
   const missing = required.filter((action) => !done.includes(action));
   if (missing.length) return res.status(403).json({ error: "Complete les actions du download gate avant de telecharger.", missing });
   db.prepare("UPDATE releases SET downloads = downloads + 1 WHERE id = ?").run(req.params.id);
-  const row = db.prepare("SELECT downloads FROM releases WHERE id = ?").get(req.params.id);
-  res.json({ downloads: row.downloads, url: release.audio_url, file_name: release.audio_file_name || `${release.title}.wav` });
+  const storageName = storageNameFromAudioUrl(release.audio_url);
+  streamAudioFile(req, res, safeUploadPath(storageName), {
+    mime: release.audio_mime || "application/octet-stream",
+    fileName: release.audio_file_name || `${release.title}.wav`,
+    preview: false
+  });
 });
 
 app.post("/api/releases/:id/buy", auth, (req, res) => {
@@ -732,7 +842,7 @@ app.get("/api/artists/:id", (req, res) => {
   `).get(req.params.id, normalizeArtistSlug(req.params.id));
   if (!artist) return res.status(404).json({ error: "Artiste introuvable." });
   const releases = db.prepare(releaseSelect(`WHERE r.user_id = ? AND ${publicReleaseWhere("r")}`, "r.created_at DESC")).all(artist.id);
-  res.json({ artist, releases });
+  res.json({ artist, releases: presentReleases(releases) });
 });
 
 app.patch("/api/me/settings", auth, (req, res) => {
@@ -788,10 +898,19 @@ app.get("/api/dashboard", auth, (req, res) => {
       COALESCE(SUM(downloads), 0) downloads, COALESCE(SUM(sales), 0) sales, COUNT(*) releases
     FROM releases WHERE user_id = ? AND moderation_status != 'removed'
   `).get(req.user.id);
+  const payoutStats = db.prepare(`
+    SELECT
+      COALESCE(SUM(p.amount_cents), 0) available_balance,
+      COALESCE(SUM(CASE WHEN p.created_at >= datetime('now', '-7 days') THEN p.amount_cents ELSE 0 END), 0) revenue_last_7_days,
+      COALESCE(SUM(CASE WHEN p.created_at < datetime('now', '-7 days') AND p.created_at >= datetime('now', '-14 days') THEN p.amount_cents ELSE 0 END), 0) revenue_previous_7_days
+    FROM purchases p
+    JOIN releases r ON r.id = p.release_id
+    WHERE r.user_id = ? AND r.moderation_status != 'removed'
+  `).get(req.user.id);
   const followers = db.prepare("SELECT COUNT(*) total FROM follows WHERE artist_id = ?").get(req.user.id).total;
   const comments = db.prepare("SELECT COUNT(*) total FROM release_comments rc JOIN releases r ON r.id = rc.release_id WHERE r.user_id = ?").get(req.user.id).total;
   const releases = db.prepare(releaseSelect("WHERE r.user_id = ? AND r.moderation_status != 'removed'", "r.created_at DESC")).all(req.user.id);
-  res.json({ stats: { ...stats, followers, comments }, releases });
+  res.json({ stats: { ...stats, ...payoutStats, followers, comments }, releases: presentReleases(releases) });
 });
 
 app.get("/api/testimonials", (_req, res) => {
@@ -834,6 +953,23 @@ app.post("/api/support/tickets", (req, res) => {
   db.prepare("INSERT INTO support_tickets (id, user_id, name, email, topic, message) VALUES (?, ?, ?, ?, ?, ?)")
     .run(ticketId, userId || null, name, email, topic, message);
   res.json({ ok: true, ticket: { id: ticketId, status: "open" } });
+});
+
+app.post("/api/careers/apply", (req, res) => {
+  const userId = req.headers.authorization ? db.prepare("SELECT user_id FROM sessions WHERE token = ?").get(req.headers.authorization.replace("Bearer ", ""))?.user_id : null;
+  const name = String(req.body.name || "").trim().slice(0, 90);
+  const email = String(req.body.email || "").trim().toLowerCase().slice(0, 140);
+  const role = String(req.body.role || "").trim().slice(0, 80);
+  const experience = String(req.body.experience || "").trim().slice(0, 1600);
+  const links = String(req.body.links || "").trim().slice(0, 400);
+  const availability = String(req.body.availability || "").trim().slice(0, 120);
+  const allowedRoles = ["Staff", "Moderator", "Community Manager", "Manager", "Developer"];
+  if (!name || !email || !role || !experience) return res.status(400).json({ error: "Nom, email, role et experience requis." });
+  if (!allowedRoles.includes(role)) return res.status(400).json({ error: "Role de candidature invalide." });
+  const applicationId = id("job");
+  db.prepare("INSERT INTO career_applications (id, user_id, name, email, role, experience, links, availability) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+    .run(applicationId, userId || null, name, email, role, experience, links, availability);
+  res.json({ ok: true, application: { id: applicationId, status: "new" } });
 });
 
 app.post("/api/short-links", auth, (req, res) => {
@@ -900,7 +1036,8 @@ app.get("/api/staff/overview", staffAuth, (_req, res) => {
   const releases = db.prepare(releaseSelect("WHERE r.moderation_status != 'removed'", "r.created_at DESC")).all();
   const tickets = db.prepare("SELECT * FROM support_tickets ORDER BY created_at DESC").all();
   const reports = db.prepare("SELECT tr.*, r.title release_title FROM takedown_reports tr JOIN releases r ON r.id = tr.release_id ORDER BY tr.created_at DESC").all();
-  res.json({ users, releases, tickets, reports });
+  const applications = db.prepare("SELECT * FROM career_applications ORDER BY created_at DESC").all();
+  res.json({ users, releases: presentReleases(releases), tickets, reports, applications });
 });
 
 app.post("/api/staff/users/:id/role", staffAuth, (req, res) => {
@@ -958,6 +1095,14 @@ app.post("/api/staff/reports/:id/status", staffAuth, (req, res) => {
     db.prepare("UPDATE releases SET moderation_status = 'removed', scan_status = 'blocked', scan_notes = ? WHERE id = ?")
       .run(`Copyright report resolved by ${req.user.email}; release removed.`, report.release_id);
   }
+  res.json({ ok: true, status });
+});
+
+app.post("/api/staff/applications/:id/status", staffAuth, (req, res) => {
+  if (!requireStaffRole(req, res, ["staff", "moderator", "admin"])) return;
+  const status = String(req.body.status || "new").toLowerCase();
+  if (!["new", "review", "interview", "accepted", "rejected"].includes(status)) return res.status(400).json({ error: "Statut candidature invalide." });
+  db.prepare("UPDATE career_applications SET status = ? WHERE id = ?").run(status, req.params.id);
   res.json({ ok: true, status });
 });
 

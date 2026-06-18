@@ -1707,6 +1707,12 @@ h1, h2, h3, p { margin-top: 0; }
 .image-edit-controls input[type="range"] {
   padding: 0;
 }
+.image-edit-error {
+  color: #ff7d7d;
+  font-size: 12px;
+  font-weight: 750;
+  margin: -2px 0 0;
+}
 
 .release-detail-page {
   max-width: min(1280px, calc(100vw - 48px));
@@ -2310,6 +2316,12 @@ h1, h2, h3, p { margin-top: 0; }
   width: 34px;
 }
 .avatar { border-radius: 9px; height: 42px; width: 42px; }
+.avatar img {
+  display: block;
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
+}
 .avatar.blue { background: #0e3e4b; color: #22d3ee; }
 .avatar.red { background: #3b171d; color: #ff6464; }
 .avatar.xl { border-radius: 999px; font-size: 20px; height: 70px; width: 70px; }
@@ -2386,6 +2398,82 @@ h1, h2, h3, p { margin-top: 0; }
 }
 .chip.active, .segmented .active { background: var(--accent); border-color: var(--accent); color: var(--ink); font-weight: 850; }
 .release-card h2 { font-size: 18px; line-height: 1.15; }
+.careers-page {
+  max-width: min(1180px, calc(100vw - 48px));
+}
+.career-roles-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  margin-bottom: 24px;
+}
+.career-role-card,
+.career-system-grid > article,
+.career-apply-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+}
+.career-role-card h2,
+.career-system-grid h2,
+.career-apply-card h2 {
+  font-size: 24px;
+  margin: 0;
+}
+.career-role-card p,
+.career-system-grid p {
+  color: var(--muted);
+  line-height: 1.45;
+  margin: 0;
+}
+.career-role-card div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.career-role-card small {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+  padding: 5px 8px;
+}
+.career-system-grid {
+  align-items: start;
+  display: grid;
+  gap: 18px;
+  grid-template-columns: minmax(260px, .8fr) minmax(0, 1.2fr);
+}
+.career-system-grid ul {
+  display: grid;
+  gap: 10px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.career-system-grid li {
+  align-items: center;
+  color: var(--muted);
+  display: flex;
+  gap: 8px;
+}
+.career-system-grid li svg {
+  color: var(--accent);
+}
+.career-apply-card label {
+  color: var(--muted);
+  display: grid;
+  font-size: 13px;
+  font-weight: 750;
+  gap: 6px;
+}
+.career-application-row a {
+  color: var(--accent);
+  display: inline-flex;
+  gap: 6px;
+}
 .badge {
   border: 1px solid rgba(255,255,255,.18);
   border-radius: 5px;
@@ -2439,6 +2527,13 @@ h1, h2, h3, p { margin-top: 0; }
 }
 
 .artist-card { align-items: center; display: grid; gap: 14px; grid-template-columns: 46px 1fr auto; }
+.artist-card-avatar {
+  border-radius: 12px;
+  overflow: hidden;
+}
+.artist-card-avatar img {
+  border-radius: inherit;
+}
 .artist-card h2 { align-items: center; display: flex; flex-wrap: wrap; font-size: 18px; gap: 6px; margin-bottom: 2px; }
 .artist-card p { color: var(--muted); margin: 0; }
 .artist-profile-page {
@@ -2898,6 +2993,88 @@ h1, h2, h3, p { margin-top: 0; }
 .card-stats { border-top: 1px solid var(--line); margin-top: 28px; padding-top: 22px; }
 .form-card { display: grid; gap: 16px; }
 .form-card label { color: var(--muted); display: grid; gap: 6px; font-size: 13px; font-weight: 750; }
+.upload-stepper {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(4, 1fr);
+}
+.upload-stepper button {
+  background: rgba(255,255,255,.04);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  height: 9px;
+  overflow: hidden;
+  padding: 0;
+}
+.upload-stepper button span {
+  display: none;
+}
+.upload-stepper button.active {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.upload-step-card {
+  background: rgba(12,12,18,.62);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  display: grid;
+  gap: 16px;
+  padding: 16px;
+}
+.upload-step-card h2 {
+  font-size: 22px;
+  margin: 0;
+}
+.upload-kind-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.upload-kind-grid button {
+  background: #101019;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: white;
+  cursor: pointer;
+  display: grid;
+  gap: 8px;
+  min-height: 130px;
+  padding: 16px;
+  text-align: left;
+}
+.upload-kind-grid button.selected,
+.upload-kind-grid button:hover {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px rgba(212,232,87,.32);
+}
+.upload-kind-grid small,
+.secure-preview-note span {
+  color: var(--muted);
+  line-height: 1.45;
+}
+.upload-track-list {
+  display: grid;
+  gap: 10px;
+}
+.secure-preview-note {
+  align-items: center;
+  background: rgba(44, 255, 143, .08);
+  border: 1px solid rgba(44, 255, 143, .22);
+  border-radius: 10px;
+  display: flex;
+  gap: 10px;
+  padding: 12px;
+}
+.secure-preview-note svg {
+  color: var(--success);
+  flex: 0 0 auto;
+}
+.upload-step-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
 .copyright-panel,
 .takedown-form,
 .copyright-console {
@@ -2963,9 +3140,6 @@ h1, h2, h3, p { margin-top: 0; }
   color: white;
   font-size: 15px;
   text-transform: uppercase;
-}
-.copyright-note {
-  font-size: 12px;
 }
 input, select, textarea {
   background: white;
@@ -3892,6 +4066,8 @@ textarea { min-height: 120px; resize: vertical; }
   .auth-panel > .logo { position: static; }
   .auth-visual { display: none; }
   .release-grid, .pack-grid, .artist-grid, .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .career-roles-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .career-system-grid { grid-template-columns: 1fr; }
   .toolbar { align-items: stretch; flex-direction: column; }
 }
 
@@ -3924,6 +4100,7 @@ textarea { min-height: 120px; resize: vertical; }
     grid-template-columns: auto auto minmax(0, 1fr) auto;
   }
   .release-grid, .pack-grid, .artist-grid, .metric-grid, .form-grid { grid-template-columns: 1fr; }
+  .career-roles-grid { grid-template-columns: 1fr; }
   .scan-policy-grid { grid-template-columns: 1fr; }
   .payment-options { grid-template-columns: 1fr; }
   .eightbit-row { grid-template-columns: 1fr; text-align: left; }
@@ -4387,6 +4564,9 @@ textarea { min-height: 120px; resize: vertical; }
   color: var(--success);
   font-style: normal;
   font-weight: 850;
+}
+.dashboard-hero aside em.negative {
+  color: #ff7d7d;
 }
 .dashboard-content .metric-grid,
 .dashboard-kpi-grid {

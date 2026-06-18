@@ -183,6 +183,18 @@ export function initDb() {
       ends_at TEXT NOT NULL,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
+    CREATE TABLE IF NOT EXISTS career_applications (
+      id TEXT PRIMARY KEY,
+      user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      name TEXT NOT NULL,
+      email TEXT NOT NULL,
+      role TEXT NOT NULL,
+      experience TEXT NOT NULL,
+      links TEXT NOT NULL DEFAULT '',
+      availability TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'new',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
   `);
 
   const userColumns = db.prepare("PRAGMA table_info(users)").all().map((column) => column.name);
@@ -221,6 +233,7 @@ export function initDb() {
   addReleaseColumn("audio_file_name", "TEXT NOT NULL DEFAULT ''");
   addReleaseColumn("audio_mime", "TEXT NOT NULL DEFAULT ''");
   addReleaseColumn("audio_size", "INTEGER NOT NULL DEFAULT 0");
+  addReleaseColumn("track_files", "TEXT NOT NULL DEFAULT '[]'");
   addReleaseColumn("cover_url", "TEXT NOT NULL DEFAULT ''");
   addReleaseColumn("visibility", "TEXT NOT NULL DEFAULT 'public'");
 
