@@ -165,6 +165,7 @@ export function initDb() {
   addUserColumn("banner_url", "TEXT NOT NULL DEFAULT ''");
   addUserColumn("social_links", "TEXT NOT NULL DEFAULT '{}'");
   addUserColumn("workspace_visibility", "TEXT NOT NULL DEFAULT 'public'");
+  addUserColumn("artist_slug", "TEXT NOT NULL DEFAULT ''");
 
   const releaseColumns = db.prepare("PRAGMA table_info(releases)").all().map((column) => column.name);
   const addReleaseColumn = (name, definition) => {

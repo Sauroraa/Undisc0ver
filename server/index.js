@@ -228,7 +228,7 @@ function staffAuth(req, res, next) {
 
 function releaseSelect(where = "", order = "r.plays DESC") {
   return `
-    SELECT r.*, u.name artist, u.avatar, u.avatar_url, u.verified, u.pro,
+    SELECT r.*, u.name artist, u.avatar, u.avatar_url, u.artist_slug, u.verified, u.pro,
       (SELECT COUNT(*) FROM likes l WHERE l.release_id = r.id) likes,
       (SELECT COUNT(*) FROM release_comments rc WHERE rc.release_id = r.id) comments,
       (SELECT COUNT(*) FROM follows f WHERE f.artist_id = u.id) followers
@@ -247,6 +247,16 @@ function optionalUserId(req) {
 
 function publicReleaseWhere(prefix = "r") {
   return `${prefix}.moderation_status = 'published' AND ${prefix}.visibility = 'public'`;
+}
+
+function normalizeArtistSlug(value = "") {
+  return String(value)
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/(^-|-$)/g, "")
+    .slice(0, 40);
 }
 
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
@@ -564,7 +574,7 @@ app.post("/api/releases/:id/buy", auth, (req, res) => {
 app.get("/api/artists", (req, res) => {
   const q = `%${req.query.q || ""}%`;
   const rows = db.prepare(`
-    SELECT u.id, u.name, u.avatar, u.avatar_url, u.logo_url, u.banner_url, u.social_links, u.genre, u.location, u.bio, u.verified, u.pro,
+    SELECT u.id, u.name, u.avatar, u.avatar_url, u.logo_url, u.banner_url, u.artist_slug, u.social_links, u.genre, u.location, u.bio, u.verified, u.pro,
       COUNT(DISTINCT r.id) releases,
       COALESCE(SUM(r.plays), 0) plays,
       COUNT(DISTINCT f.follower_id) followers
@@ -580,22 +590,29 @@ app.get("/api/artists", (req, res) => {
 
 app.get("/api/artists/:id", (req, res) => {
   const artist = db.prepare(`
-    SELECT u.id, u.name, u.avatar, u.avatar_url, u.logo_url, u.banner_url, u.social_links, u.genre, u.location, u.bio, u.verified, u.pro,
+    SELECT u.id, u.name, u.avatar, u.avatar_url, u.logo_url, u.banner_url, u.artist_slug, u.social_links, u.genre, u.location, u.bio, u.verified, u.pro,
       COUNT(DISTINCT r.id) releases_count,
       COALESCE(SUM(r.plays), 0) plays,
       COUNT(DISTINCT f.follower_id) followers
     FROM users u
     LEFT JOIN releases r ON r.user_id = u.id AND ${publicReleaseWhere("r")}
     LEFT JOIN follows f ON f.artist_id = u.id
-    WHERE u.id = ? AND u.workspace_visibility = 'public'
+    WHERE (u.id = ? OR u.artist_slug = ?) AND u.workspace_visibility = 'public'
     GROUP BY u.id
-  `).get(req.params.id);
+  `).get(req.params.id, normalizeArtistSlug(req.params.id));
   if (!artist) return res.status(404).json({ error: "Artiste introuvable." });
-  const releases = db.prepare(releaseSelect(`WHERE r.user_id = ? AND ${publicReleaseWhere("r")}`, "r.created_at DESC")).all(req.params.id);
+  const releases = db.prepare(releaseSelect(`WHERE r.user_id = ? AND ${publicReleaseWhere("r")}`, "r.created_at DESC")).all(artist.id);
   res.json({ artist, releases });
 });
 
 app.patch("/api/me/settings", auth, (req, res) => {
+  const artistSlug = normalizeArtistSlug(req.body.artist_slug || "");
+  if (artistSlug && artistSlug.length < 3) return res.status(400).json({ error: "Le lien perso doit contenir au moins 3 caracteres." });
+  if (artistSlug && /^usr_/i.test(artistSlug)) return res.status(400).json({ error: "Ce lien perso est reserve." });
+  if (artistSlug) {
+    const existing = db.prepare("SELECT id FROM users WHERE artist_slug = ? AND id != ?").get(artistSlug, req.user.id);
+    if (existing) return res.status(409).json({ error: "Ce lien perso est deja pris." });
+  }
   const fields = {
     name: String(req.body.name || req.user.name).trim(),
     email: String(req.body.email || req.user.email).trim().toLowerCase(),
@@ -605,6 +622,7 @@ app.patch("/api/me/settings", auth, (req, res) => {
     avatar_url: String(req.body.avatar_url || "").trim(),
     logo_url: String(req.body.logo_url || "").trim(),
     banner_url: String(req.body.banner_url || "").trim(),
+    artist_slug: artistSlug,
     workspace_visibility: ["public", "private"].includes(String(req.body.workspace_visibility).toLowerCase()) ? String(req.body.workspace_visibility).toLowerCase() : "public",
     social_links: JSON.stringify({
       instagram: String(req.body.instagram || "").trim(),
@@ -615,8 +633,8 @@ app.patch("/api/me/settings", auth, (req, res) => {
   };
   if (!fields.name || !fields.email) return res.status(400).json({ error: "Nom et email requis." });
   try {
-    db.prepare(`UPDATE users SET name = ?, email = ?, location = ?, bio = ?, genre = ?, avatar_url = ?, logo_url = ?, banner_url = ?, workspace_visibility = ?, social_links = ? WHERE id = ?`)
-      .run(fields.name, fields.email, fields.location, fields.bio, fields.genre, fields.avatar_url, fields.logo_url, fields.banner_url, fields.workspace_visibility, fields.social_links, req.user.id);
+    db.prepare(`UPDATE users SET name = ?, email = ?, location = ?, bio = ?, genre = ?, avatar_url = ?, logo_url = ?, banner_url = ?, artist_slug = ?, workspace_visibility = ?, social_links = ? WHERE id = ?`)
+      .run(fields.name, fields.email, fields.location, fields.bio, fields.genre, fields.avatar_url, fields.logo_url, fields.banner_url, fields.artist_slug, fields.workspace_visibility, fields.social_links, req.user.id);
     res.json({ user: publicUser(db.prepare("SELECT * FROM users WHERE id = ?").get(req.user.id)) });
   } catch {
     res.status(409).json({ error: "Cet email existe deja." });
@@ -722,11 +740,11 @@ app.get("/robots.txt", (_req, res) => {
 });
 
 app.get("/sitemap.xml", (_req, res) => {
-  const artists = db.prepare("SELECT id, created_at FROM users ORDER BY created_at DESC").all();
+  const artists = db.prepare("SELECT id, artist_slug, created_at FROM users ORDER BY created_at DESC").all();
   const releases = db.prepare("SELECT id, created_at FROM releases WHERE moderation_status = 'published' AND visibility = 'public' ORDER BY created_at DESC").all();
   const entries = [
     ...sitemapRoutes.map(sitemapEntry),
-    ...artists.map((artist) => sitemapEntry({ path: `/artist/${artist.id}`, lastmod: artist.created_at, changefreq: "weekly", priority: "0.7" })),
+    ...artists.map((artist) => sitemapEntry({ path: `/artist/${artist.artist_slug || artist.id}`, lastmod: artist.created_at, changefreq: "weekly", priority: "0.7" })),
     ...releases.map((release) => sitemapEntry({ path: `/release/${release.id}`, lastmod: release.created_at, changefreq: "weekly", priority: "0.8" }))
   ];
   res.type("application/xml").send([

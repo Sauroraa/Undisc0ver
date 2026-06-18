@@ -936,6 +936,53 @@ function isImageAvatar(value = "") {
   return /^https?:\/\//i.test(value) || String(value).startsWith("/") || /^data:image\//i.test(value);
 }
 
+function normalizeArtistSlug(value = "") {
+  return String(value)
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/(^-|-$)/g, "")
+    .slice(0, 40);
+}
+
+function artistHandle(artist = {}) {
+  return artist.artist_slug || artist.slug || artist.id;
+}
+
+function artistPath(artist = {}) {
+  return `#/artist/${artistHandle(artist)}`;
+}
+
+function artistPublicUrl(artist = {}) {
+  return `https://undisc0ver.com/artist/${artistHandle(artist)}`;
+}
+
+function useCloseOnOutsideClick(open, onClose) {
+  const ref = useRef(null);
+
+  useEffect(() => {
+    if (!open) return undefined;
+
+    function handlePointerDown(event) {
+      if (ref.current && !ref.current.contains(event.target)) onClose();
+    }
+
+    function handleKeyDown(event) {
+      if (event.key === "Escape") onClose();
+    }
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [open, onClose]);
+
+  return ref;
+}
+
 async function request(path, options = {}) {
   const token = localStorage.getItem("undiscover_token");
   const res = await fetch(`${API}${path}`, {
@@ -1594,7 +1641,13 @@ function HeroPill({ href, label, announcement = "New" }) {
 function TrustedAvatarStack() {
   const { data } = useData("/artists", []);
   const artists = data?.artists || [];
-  const visibleArtists = artists.slice(0, 4);
+  const visibleArtists = artists
+    .map((artist) => ({
+      ...artist,
+      logo: [artist.logo_url, artist.avatar_url].find((src) => isImageAvatar(src))
+    }))
+    .filter((artist) => artist.logo)
+    .slice(0, 4);
   const releaseCount = artists.reduce((sum, artist) => sum + Number(artist.releases || 0), 0);
   const userLabel = `${artists.length} utilisateur${artists.length > 1 ? "s" : ""} inscrit${artists.length > 1 ? "s" : ""}`;
   const releaseLabel = `${shortNumber(releaseCount)} sortie${releaseCount > 1 ? "s" : ""} publique${releaseCount > 1 ? "s" : ""}`;
@@ -1602,23 +1655,19 @@ function TrustedAvatarStack() {
   return (
     <div className="trusted-stack" aria-label="Utilisateurs inscrits sur Undiscover" data-no-translate>
       <div className="trusted-avatars">
-        {visibleArtists.length ? visibleArtists.map((artist, idx) => (
+        {visibleArtists.map((artist, idx) => (
           <a
             className="trusted-user-link hover-avatar"
-            href={`#/artist/${artist.id}`}
+            href={artistPath(artist)}
             key={artist.id}
             style={{ zIndex: visibleArtists.length - idx }}
             aria-label={artist.name}
           >
-            <span className="trusted-avatar-index">{idx}</span>
             <span className="trusted-avatar-face">
-              {isImageAvatar(artist.avatar_url || artist.avatar)
-                ? <img src={artist.avatar_url || artist.avatar} alt="" />
-                : <span>{artist.avatar || initials(artist.name)}</span>}
+              <img src={artist.logo} alt="" />
             </span>
-            <i>{artist.name}</i>
           </a>
-        )) : <span className="trusted-empty-count">0</span>}
+        ))}
       </div>
       <p><strong>{userLabel}</strong> · {releaseLabel}</p>
     </div>
@@ -2055,8 +2104,9 @@ function Topbar({ notify }) {
 
 function InfoMenu({ notify }) {
   const [open, setOpen] = useState(false);
+  const menuRef = useCloseOnOutsideClick(open, () => setOpen(false));
   return (
-    <div className="dropdown">
+    <div className="dropdown" ref={menuRef}>
       <button className="icon-button" onClick={() => setOpen((value) => !value)} aria-label="Open information menu"><Info size={17} /></button>
       {open && (
         <div className="dropdown-panel">
@@ -2073,6 +2123,7 @@ function InfoMenu({ notify }) {
 
 function NotificationMenu({ notify }) {
   const [open, setOpen] = useState(false);
+  const menuRef = useCloseOnOutsideClick(open, () => setOpen(false));
   const [selected, setSelected] = useState("all");
   const notes = [
     { id: "1", category: "updates", icon: Info, title: "Catalog update", description: "A new analytics view has been deployed.", time: "just now" },
@@ -2083,7 +2134,7 @@ function NotificationMenu({ notify }) {
   const categories = ["all", "updates", "alerts", "reminders"];
   const filtered = selected === "all" ? notes : notes.filter((item) => item.category === selected);
   return (
-    <div className="dropdown">
+    <div className="dropdown" ref={menuRef}>
       <button className="icon-button badge-button" onClick={() => setOpen((value) => !value)} aria-label="Open notifications"><Bell size={17} /><span>{notes.length}</span></button>
       {open && (
         <div className="dropdown-panel wide notifications-filter">
@@ -2112,8 +2163,9 @@ function NotificationMenu({ notify }) {
 
 function UserMenu({ user, logout }) {
   const [open, setOpen] = useState(false);
+  const menuRef = useCloseOnOutsideClick(open, () => setOpen(false));
   return (
-    <div className="dropdown">
+    <div className="dropdown" ref={menuRef}>
       <button className="icon-button user-trigger" onClick={() => setOpen((value) => !value)} aria-label="Open account menu">
         <CircleUserRound size={17} />
         <span>{user.avatar}</span>
@@ -2121,7 +2173,7 @@ function UserMenu({ user, logout }) {
       {open && (
         <div className="dropdown-panel">
           <b>Signed in as <small>{user.email}</small></b>
-          <a href={`#/artist/${user.id}`}>Profile</a>
+          <a href={artistPath(user)}>Profile</a>
           <a href="#/settings">Settings</a>
           <a href="#/dashboard">Dashboard</a>
           <a href="#/catalog">Catalog</a>
@@ -3218,7 +3270,6 @@ function ArtistProfile({ id, notify, playRelease }) {
   if (loading) return <main className="page"><SkeletonList /></main>;
   if (error) return <ErrorPage message={error} />;
   const { artist, releases } = data;
-  const slug = artist.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
   const totalDownloads = releases.reduce((sum, release) => sum + Number(release.downloads || 0), 0);
   const totalSales = releases.reduce((sum, release) => sum + Number(release.sales || 0), 0);
   const revenue = releases.reduce((sum, release) => sum + Number(release.revenue_cents || 0), 0);
@@ -3226,7 +3277,7 @@ function ArtistProfile({ id, notify, playRelease }) {
   const freeCount = releases.filter((release) => release.free).length;
   const paidCount = Math.max(releases.length - freeCount, 0);
   const socialLinks = (() => { try { return JSON.parse(artist.social_links || "{}"); } catch { return {}; } })();
-  const profileUrl = `https://undisc0ver.com/artist/${artist.id}`;
+  const profileUrl = artistPublicUrl(artist);
   const copyProfile = async () => {
     await navigator.clipboard?.writeText(profileUrl);
     notify("Profile link copied.");
@@ -3238,7 +3289,7 @@ function ArtistProfile({ id, notify, playRelease }) {
           {artist.banner_url ? <img className="artist-banner-image" src={artist.banner_url} alt="" /> : <><div className="profile-banner-noise" /><CrateMark className="cover-crate" /></>}
           <div className="profile-banner-copy">
             <span>Public artist profile</span>
-            <strong>{profileUrl}</strong>
+            <strong>{artist.name}</strong>
           </div>
           <div className="profile-banner-meter" aria-hidden="true">
             {Array.from({ length: 18 }).map((_, index) => <i key={index} style={{ height: `${22 + (index % 6) * 9}px` }} />)}
@@ -3360,7 +3411,7 @@ function ReleaseDetail({ id, notify, playRelease }) {
         <div className="release-detail-copy">
           <p className="label">{release.kind} - {release.genre} - {release.visibility || "public"}</p>
           <h1>{release.title}</h1>
-          <p className="muted">By <a href={`#/artist/${release.user_id}`}>{release.artist}</a> - {release.tracks} track(s) - {release.duration}</p>
+          <p className="muted">By <a href={artistPath({ id: release.user_id, artist_slug: release.artist_slug })}>{release.artist}</a> - {release.tracks} track(s) - {release.duration}</p>
           <p>{release.description}</p>
           <div className="release-share-line">
             <span>https://undisc0ver.com/release/{release.id}</span>
@@ -3474,7 +3525,7 @@ function UploadPage({ notify }) {
       <PageHeader eyebrow="New release" title="Upload a track, EP or dubpack." text="Metadata is saved to the production database and appears after rights checks pass." />
       <form className="form-card" onSubmit={submit}>
         <FileUploadPanel file={file} setFile={setFile} notify={notify} />
-        <ImageUploadPanel file={coverFile} setFile={setCoverFile} title="Cover artwork" text="Upload a square JPG, PNG or WebP cover for this release." />
+        <ImageUploadPanel file={coverFile} setFile={setCoverFile} title="Cover artwork" text="Upload a square JPG, PNG or WebP cover for this release." defaultWidth={1400} defaultHeight={1400} />
         <label>Track title<input value={form.title} onChange={(e) => update("title", e.target.value)} placeholder="e.g. Your release title" required /></label>
         <div className="form-grid">
           <label>Type<select value={form.kind} onChange={(e) => update("kind", e.target.value)}><option>Track</option><option>EP</option><option>Dubpack</option></select></label>
@@ -3637,19 +3688,84 @@ function FileUploadPanel({ file, setFile, notify }) {
   );
 }
 
-function ImageUploadPanel({ file, setFile, title = "Image upload", text = "Upload a JPG, PNG or WebP image." }) {
+async function editImageFile(file, options) {
+  const imageUrl = URL.createObjectURL(file);
+  try {
+    const image = new Image();
+    image.src = imageUrl;
+    await image.decode();
+    const width = Math.max(64, Number(options.width) || image.naturalWidth);
+    const height = Math.max(64, Number(options.height) || image.naturalHeight);
+    const zoom = Math.max(.2, Number(options.zoom) || 1);
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d");
+    ctx.clearRect(0, 0, width, height);
+    const scale = Math.max(width / image.naturalWidth, height / image.naturalHeight) * zoom;
+    const drawWidth = image.naturalWidth * scale;
+    const drawHeight = image.naturalHeight * scale;
+    const x = (width - drawWidth) / 2 + (Number(options.offsetX) || 0);
+    const y = (height - drawHeight) / 2 + (Number(options.offsetY) || 0);
+    ctx.drawImage(image, x, y, drawWidth, drawHeight);
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/webp", .92));
+    const name = file.name.replace(/\.[^.]+$/, "") || "image";
+    return new File([blob], `${name}-${width}x${height}.webp`, { type: "image/webp" });
+  } finally {
+    URL.revokeObjectURL(imageUrl);
+  }
+}
+
+function ImageUploadPanel({ file, setFile, title = "Image upload", text = "Upload a JPG, PNG or WebP image.", defaultWidth = 1200, defaultHeight = 1200 }) {
   const fileInputId = useId();
+  const [sourceFile, setSourceFile] = useState(null);
+  const [editing, setEditing] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [settings, setSettings] = useState({ width: defaultWidth, height: defaultHeight, zoom: 1, offsetX: 0, offsetY: 0 });
   const preview = file ? URL.createObjectURL(file) : "";
   useEffect(() => () => { if (preview) URL.revokeObjectURL(preview); }, [preview]);
+  const updateSetting = (key, value) => setSettings((current) => ({ ...current, [key]: value }));
+  const chooseFile = (event) => {
+    const nextFile = event.target.files?.[0] || null;
+    setSourceFile(nextFile);
+    setFile(nextFile);
+    setEditing(!!nextFile);
+    setSettings({ width: defaultWidth, height: defaultHeight, zoom: 1, offsetX: 0, offsetY: 0 });
+  };
+  const applyEdit = async () => {
+    if (!sourceFile && !file) return;
+    setBusy(true);
+    try {
+      setFile(await editImageFile(sourceFile || file, settings));
+      setEditing(false);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const removeImage = () => {
+    setSourceFile(null);
+    setFile(null);
+    setEditing(false);
+  };
   return (
     <section className="file-upload-card image-upload-card">
       <h3>{title}</h3>
       <label className="file-dropzone image-dropzone" htmlFor={fileInputId}>
         {preview ? <img src={preview} alt="" /> : <Upload size={24} />}
         <span>{file ? file.name : text}</span>
-        <input id={fileInputId} type="file" accept="image/png,image/jpeg,image/webp,image/gif" onChange={(event) => setFile(event.target.files?.[0] || null)} />
+        <input id={fileInputId} type="file" accept="image/png,image/jpeg,image/webp,image/gif" onChange={chooseFile} />
       </label>
-      {file && <button className="button ghost" type="button" onClick={() => setFile(null)}><Trash size={16} /> Remove image</button>}
+      {file && editing && (
+        <div className="image-edit-controls">
+          <label>Width<input type="number" min="64" max="4000" value={settings.width} onChange={(e) => updateSetting("width", e.target.value)} /></label>
+          <label>Height<input type="number" min="64" max="4000" value={settings.height} onChange={(e) => updateSetting("height", e.target.value)} /></label>
+          <label>Zoom<input type="range" min=".5" max="3" step=".05" value={settings.zoom} onChange={(e) => updateSetting("zoom", e.target.value)} /></label>
+          <label>X<input type="number" value={settings.offsetX} onChange={(e) => updateSetting("offsetX", e.target.value)} /></label>
+          <label>Y<input type="number" value={settings.offsetY} onChange={(e) => updateSetting("offsetY", e.target.value)} /></label>
+          <button className="button accent" type="button" onClick={applyEdit} disabled={busy}>{busy ? <Loader2 className="spin" size={16} /> : <Settings size={16} />} Apply resize</button>
+        </div>
+      )}
+      {file && <button className="button ghost" type="button" onClick={removeImage}><Trash size={16} /> Remove image</button>}
     </section>
   );
 }
@@ -3867,6 +3983,7 @@ function SettingsPage({ notify }) {
     avatar_url: user?.avatar_url || "",
     logo_url: user?.logo_url || "",
     banner_url: user?.banner_url || "",
+    artist_slug: user?.artist_slug || "",
     workspace_visibility: user?.workspace_visibility || "public",
     instagram: socialLinks.instagram || "",
     soundcloud: socialLinks.soundcloud || "",
@@ -3876,7 +3993,8 @@ function SettingsPage({ notify }) {
   const [logoFile, setLogoFile] = useState(null);
   const [bannerFile, setBannerFile] = useState(null);
   if (!user) return <AuthRequired />;
-  const updateProfile = (key, value) => setProfile((current) => ({ ...current, [key]: value }));
+  const updateProfile = (key, value) => setProfile((current) => ({ ...current, [key]: key === "artist_slug" ? normalizeArtistSlug(value) : value }));
+  const profilePreviewUrl = `https://undisc0ver.com/artist/${profile.artist_slug || user.id}`;
   const submit = async (event) => {
     event.preventDefault();
     const logo = logoFile ? await uploadImage(logoFile) : null;
@@ -3904,14 +4022,15 @@ function SettingsPage({ notify }) {
             <label>Email<input type="email" value={profile.email} onChange={(e) => updateProfile("email", e.target.value)} /></label>
             <label>Location<input value={profile.location} onChange={(e) => updateProfile("location", e.target.value)} /></label>
             <label>Genre<select value={profile.genre} onChange={(e) => updateProfile("genre", e.target.value)}><option>Tech House</option><option>Techno</option><option>Melodic</option><option>Afro House</option><option>Drum & Bass</option><option>Hard Techno</option><option>Riddim</option><option>Dubstep</option></select></label>
+            <label>Custom profile link<input value={profile.artist_slug} onChange={(e) => updateProfile("artist_slug", e.target.value)} placeholder="chamber" /><small>{profilePreviewUrl}</small></label>
             <label>Role<input defaultValue="Artist owner" disabled /></label>
           </div>
         </section>
         <section className="settings-block">
           <div><h2>Brand assets</h2><p>Set your public logo/profile picture and banner.</p></div>
           <div className="settings-fields">
-            <ImageUploadPanel file={logoFile} setFile={setLogoFile} title="Logo / profile picture" text="Upload your artist logo or profile picture." />
-            <ImageUploadPanel file={bannerFile} setFile={setBannerFile} title="Banner" text="Upload a wide banner for your artist page." />
+            <ImageUploadPanel file={logoFile} setFile={setLogoFile} title="Logo / profile picture" text="Upload your artist logo or profile picture." defaultWidth={800} defaultHeight={800} />
+            <ImageUploadPanel file={bannerFile} setFile={setBannerFile} title="Banner" text="Upload a wide banner for your artist page." defaultWidth={1920} defaultHeight={640} />
             <label>Logo URL<input value={profile.logo_url} onChange={(e) => updateProfile("logo_url", e.target.value)} placeholder="https://..." /></label>
             <label>Banner URL<input value={profile.banner_url} onChange={(e) => updateProfile("banner_url", e.target.value)} placeholder="https://..." /></label>
           </div>
@@ -4062,6 +4181,68 @@ function LinkShortenerWidget({ notify }) {
   );
 }
 
+function ProfileLinkEditor({ user, notify }) {
+  const auth = useAuth();
+  const [slug, setSlug] = useState(user.artist_slug || "");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const socialLinks = (() => { try { return JSON.parse(user.social_links || "{}"); } catch { return {}; } })();
+  const preview = `https://undisc0ver.com/artist/${slug || user.id}`;
+  const save = async () => {
+    setError("");
+    setSaving(true);
+    try {
+      await request("/me/settings", {
+        method: "PATCH",
+        body: JSON.stringify({
+          name: user.name,
+          email: user.email,
+          location: user.location,
+          bio: user.bio,
+          genre: user.genre,
+          avatar_url: user.avatar_url,
+          logo_url: user.logo_url,
+          banner_url: user.banner_url,
+          workspace_visibility: user.workspace_visibility,
+          instagram: socialLinks.instagram || "",
+          soundcloud: socialLinks.soundcloud || "",
+          spotify: socialLinks.spotify || "",
+          website: socialLinks.website || "",
+          artist_slug: slug
+        })
+      });
+      await auth.loginWithToken(localStorage.getItem("undiscover_token"));
+      notify("Profile link saved.");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+  const copy = async () => {
+    await navigator.clipboard?.writeText(preview).catch(() => {});
+    notify("Profile link copied.");
+  };
+  return (
+    <section className="profile-link-card">
+      <div className="link-shortener-head">
+        <CircleUserRound size={22} />
+        <div>
+          <h2>Clean profile link</h2>
+          <p>Set a short public artist URL for bios, promos and stories.</p>
+        </div>
+      </div>
+      <label>Artist URL<input value={slug} onChange={(event) => setSlug(normalizeArtistSlug(event.target.value))} placeholder="chamber" /></label>
+      <div className="short-link-result always-visible">
+        <span>{preview}</span>
+        <button type="button" onClick={copy}><Copy size={16} /> Copy</button>
+      </div>
+      {error && <p className="error">{error}</p>}
+      <button className="button accent" type="button" onClick={save} disabled={saving}>{saving ? <Loader2 className="spin" size={16} /> : <Check size={16} />} Save link</button>
+    </section>
+  );
+}
+
 function DashboardHero({ user, stats }) {
   return (
     <section className="dashboard-hero">
@@ -4071,7 +4252,7 @@ function DashboardHero({ user, stats }) {
         <p>Manage releases, revenue, downloads and direct audience signals from a clean full-screen workspace.</p>
         <div className="dashboard-hero-actions">
           <a className="button accent" href="#/upload"><Upload size={16} /> New release</a>
-          <a className="button ghost" href={`#/artist/${user.id}`}><CircleUserRound size={16} /> View profile</a>
+          <a className="button ghost" href={artistPath(user)}><CircleUserRound size={16} /> View profile</a>
         </div>
       </div>
       <aside>
@@ -4113,6 +4294,7 @@ function Dashboard({ section, notify, playRelease }) {
                 <DashboardInsight title="Catalog health" icon={ShieldCheck} value={`${releases.length} live drops`} text={`${freeReleases} free gate(s), ${paidReleases} paid release(s), rights checks active.`} href="#/catalog" action="Review catalog" />
               </section>
               <div className="dashboard-overview-grid">
+                <ProfileLinkEditor user={user} notify={notify} />
                 <LinkShortenerWidget notify={notify} />
                 <RevenueBars releases={releases} />
               </div>
@@ -4497,7 +4679,7 @@ function ArtistCard({ artist, notify }) {
     <article className="card artist-card">
       <span className="avatar">{artist.avatar}</span>
       <div>
-        <h2><a href={`#/artist/${artist.id}`}>{artist.name}</a> {artist.pro ? <span className="badge dark">U0 Pro</span> : null}</h2>
+        <h2><a href={artistPath(artist)}>{artist.name}</a> {artist.pro ? <span className="badge dark">U0 Pro</span> : null}</h2>
         <p>{artist.genre} - {shortNumber(artist.followers)} followers</p>
       </div>
       <FollowButton artistId={artist.id} notify={notify} />

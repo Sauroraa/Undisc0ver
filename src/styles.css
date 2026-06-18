@@ -629,8 +629,8 @@ h1, h2, h3, p { margin-top: 0; }
 }
 .trusted-user-link {
   align-items: center;
-  background: var(--accent);
-  border: 1px solid var(--base);
+  background: rgba(255,255,255,.08);
+  border: 1px solid rgba(255,255,255,.18);
   border-radius: 999px;
   color: var(--ink);
   display: inline-flex;
@@ -639,28 +639,15 @@ h1, h2, h3, p { margin-top: 0; }
   position: relative;
   transition: transform .3s ease;
 }
-.trusted-user-link:first-child,
-.trusted-empty-count:first-child {
+.trusted-user-link:first-child {
   margin-left: 0;
 }
 .trusted-user-link:hover {
   transform: translateY(-8px);
 }
-.trusted-avatar-index {
-  align-items: center;
-  border-right: 1px solid rgba(5,5,9,.18);
-  display: inline-flex;
-  font-size: 10px;
-  font-weight: 950;
-  height: 100%;
-  justify-content: center;
-  min-width: 20px;
-}
 .trusted-avatar-face {
   align-items: center;
   display: inline-flex;
-  font-size: 10px;
-  font-weight: 950;
   height: 24px;
   justify-content: center;
   overflow: hidden;
@@ -670,33 +657,6 @@ h1, h2, h3, p { margin-top: 0; }
   height: 100%;
   object-fit: cover;
   width: 100%;
-}
-.trusted-user-link i {
-  background: var(--accent);
-  border-radius: 6px;
-  color: var(--ink);
-  font-size: 11px;
-  font-style: normal;
-  font-weight: 900;
-  left: 50%;
-  padding: 5px 7px;
-  pointer-events: none;
-  position: absolute;
-  top: -34px;
-  white-space: nowrap;
-}
-.trusted-empty-count {
-  align-items: center;
-  background: rgba(255,255,255,.06);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  color: var(--muted);
-  display: inline-flex;
-  font-size: 12px;
-  font-weight: 950;
-  height: 26px;
-  justify-content: center;
-  width: 26px;
 }
 .trusted-stack p {
   color: var(--muted);
@@ -1660,6 +1620,32 @@ h1, h2, h3, p { margin-top: 0; }
   object-fit: cover;
   width: 120px;
 }
+.image-edit-controls {
+  align-items: end;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(5, minmax(72px, 1fr)) auto;
+}
+.image-edit-controls label {
+  color: var(--muted);
+  display: grid;
+  font-size: 11px;
+  font-weight: 850;
+  gap: 6px;
+  text-transform: uppercase;
+}
+.image-edit-controls input {
+  background: #111119;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: white;
+  min-height: 38px;
+  min-width: 0;
+  padding: 8px 10px;
+}
+.image-edit-controls input[type="range"] {
+  padding: 0;
+}
 
 .release-detail-page {
   max-width: 1180px;
@@ -1796,6 +1782,13 @@ h1, h2, h3, p { margin-top: 0; }
   display: grid;
   font-weight: 750;
   gap: 7px;
+}
+.settings-fields label small {
+  color: var(--accent);
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 11px;
+  font-weight: 750;
+  overflow-wrap: anywhere;
 }
 .settings-fields .full {
   grid-column: 1 / -1;
@@ -2370,9 +2363,12 @@ h1, h2, h3, p { margin-top: 0; }
   height: 118px;
   justify-content: center;
   letter-spacing: -.04em;
+  overflow: hidden;
   width: 118px;
 }
 .artist-avatar-xl img {
+  border-radius: 18px;
+  display: block;
   height: 100%;
   object-fit: cover;
   width: 100%;
@@ -3617,6 +3613,12 @@ textarea { min-height: 120px; resize: vertical; }
   .eightbit-row em,
   .eightbit-row b:nth-child(3) { text-align: left; }
   .settings-fields { grid-template-columns: 1fr; }
+  .image-edit-controls {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .image-edit-controls button {
+    grid-column: 1 / -1;
+  }
   .settings-actions { flex-direction: column; }
   .file-dropzone { flex-direction: column; }
   .testimonial-grid,
@@ -4124,10 +4126,15 @@ textarea { min-height: 120px; resize: vertical; }
   gap: 16px;
   grid-template-columns: minmax(0, 1fr) minmax(460px, .9fr);
 }
+.dashboard-overview-grid .chart-panel {
+  grid-column: 1 / -1;
+}
+.profile-link-card,
 .dashboard-overview-grid .link-shortener-card,
 .dashboard-overview-grid .chart-panel {
   margin: 0;
 }
+.profile-link-card,
 .link-shortener-card {
   background: linear-gradient(180deg, rgba(24,24,36,.94), rgba(14,14,22,.98));
   border: 1px solid rgba(255,255,255,.1);
@@ -4137,12 +4144,14 @@ textarea { min-height: 120px; resize: vertical; }
   margin: 18px 0;
   padding: 24px;
 }
+.profile-link-card label,
 .link-shortener-card label {
   align-items: center;
   display: grid;
   gap: 8px;
   grid-template-columns: 130px minmax(0, 1fr);
 }
+.profile-link-card input,
 .link-shortener-card input {
   min-width: 0;
   width: 100%;
