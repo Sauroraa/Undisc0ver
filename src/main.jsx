@@ -1171,6 +1171,7 @@ function parseDurationSeconds(value = "0:00") {
 }
 
 function audioPreviewLimitSeconds(release = {}) {
+  if (!release) return null;
   return release.free ? null : 45;
 }
 
