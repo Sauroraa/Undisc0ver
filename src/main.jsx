@@ -134,8 +134,10 @@ const TRANSLATIONS = {
     "Charts": "Classements",
     "Explore": "Explorer",
     "Upload release": "Uploader une sortie",
-    "Explore catalog": "Explorer le catalogue",
-    "See what is moving this week.": "Voir ce qui bouge cette semaine.",
+  "Explore catalog": "Explorer le catalogue",
+  "Browse catalog": "Parcourir le catalogue",
+  "Production catalog, gates and checkout are live": "Catalogue production, gates et checkout sont en ligne",
+  "See what is moving this week.": "Voir ce qui bouge cette semaine.",
     "Publish a track, EP or dubpack.": "Publier un track, EP ou dubpack.",
     "Browse new drops and free downloads.": "Parcourir les nouvelles sorties et free downloads.",
     "Compare plans and checkout flows.": "Comparer les plans et les paiements.",
@@ -783,6 +785,187 @@ Object.assign(TRANSLATIONS.de, {
   "No results": "Keine Ergebnisse"
 });
 
+Object.assign(TRANSLATIONS.fr, {
+  "Upgrade to U0 Pro": "Passer a U0 Pro",
+  "Trusted by": "Adopte par",
+  "Information": "Information",
+  "Signed in as": "Connecte en tant que",
+  "Logout": "Deconnexion",
+  "Staff panel": "Panel staff",
+  "View all notifications": "Voir toutes les notifications",
+  "All notifications marked as read.": "Toutes les notifications sont marquees comme lues.",
+  "Artist index": "Index artistes",
+  "Artist dashboard": "Dashboard artiste",
+  "Trending by genre": "Tendances par genre",
+  "Based on what you like": "Base sur ce que tu aimes",
+  "Artists to follow": "Artistes a suivre",
+  "Top 100": "Top 100",
+  "Explore": "Explorer",
+  "Explore ->": "Explorer ->",
+  "Top 100 ->": "Top 100 ->",
+  "Ranked from real plays, downloads, likes, comments, sales and release freshness.": "Classement base sur les vrais plays, downloads, likes, commentaires, ventes et fraicheur des sorties.",
+  "Top 100, plays, downloads and countries.": "Top 100, ecoutes, telechargements et pays.",
+  "Top countries": "Top pays",
+  "Top downloads": "Top telechargements",
+  "Top plays": "Top ecoutes",
+  "Recently listened": "Recemment ecoute",
+  "Listening history": "Historique d'ecoute",
+  "Recommended for you": "Recommande pour toi",
+  "Promoted": "Sponsorise",
+  "Campaigns": "Campagnes",
+  "Create campaign": "Creer une campagne",
+  "Manage the full site.": "Gere tout le site.",
+  "Roles, moderation, support tickets and takedowns in one production console.": "Roles, moderation, tickets support et retraits dans une console propre.",
+  "Moderation": "Moderation",
+  "Users": "Utilisateurs",
+  "Role": "Role",
+  "Plan": "Plan",
+  "Badge": "Badge",
+  "Verified artist": "Artiste verifie",
+  "Free": "Gratuit",
+  "Pro": "Pro",
+  "Label": "Label",
+  "Apply crop": "Appliquer le cadrage",
+  "Edit crop": "Modifier le cadrage",
+  "Preset": "Preset",
+  "Avatar": "Avatar",
+  "Cover square": "Cover carree",
+  "Story": "Story",
+  "Banner": "Banniere",
+  "Custom": "Custom",
+  "Width": "Largeur",
+  "Height": "Hauteur",
+  "Zoom": "Zoom",
+  "Remove image": "Supprimer l'image",
+  "Upload your artist logo or profile picture.": "Upload ton logo artiste ou ta photo de profil.",
+  "Upload a wide banner for your artist page.": "Upload une banniere large pour ta page artiste.",
+  "Logo / profile picture": "Logo / photo de profil",
+  "Brand assets": "Assets de marque",
+  "Set your public logo/profile picture and banner.": "Definis ton logo/photo de profil public et ta banniere.",
+  "Catalog health": "Sante du catalogue",
+  "Review catalog": "Voir le catalogue",
+  "Open analytics": "Ouvrir analytics",
+  "live drops": "drops live",
+  "free gate(s)": "gate(s) gratuits",
+  "paid release(s)": "sortie(s) payantes",
+  "rights checks active.": "checks droits actifs.",
+  "Free gate(s)": "Gate(s) gratuits",
+  "No audio selected": "Aucun audio selectionne",
+  "Choose a WAV, MP3 or AIFF file to attach to this release.": "Choisis un fichier WAV, MP3 ou AIFF a attacher a cette sortie."
+});
+
+Object.assign(TRANSLATIONS.nl, {
+  "Information": "Informatie",
+  "Signed in as": "Ingelogd als",
+  "Staff panel": "Staffpaneel",
+  "View all notifications": "Alle meldingen bekijken",
+  "Artist index": "Artiestenindex",
+  "Browse catalog": "Catalogus bekijken",
+  "Production catalog, gates and checkout are live": "Productiecatalogus, gates en checkout zijn live",
+  "Trending by genre": "Trending per genre",
+  "Based on what you like": "Gebaseerd op wat je leuk vindt",
+  "Artists to follow": "Artiesten om te volgen",
+  "Explore ->": "Verkennen ->",
+  "Top 100 ->": "Top 100 ->",
+  "Top 100, plays, downloads and countries.": "Top 100, plays, downloads en landen.",
+  "Top countries": "Top landen",
+  "Top downloads": "Top downloads",
+  "Top plays": "Top plays",
+  "Recently listened": "Recent beluisterd",
+  "Listening history": "Luistergeschiedenis",
+  "Recommended for you": "Aanbevolen voor jou",
+  "Promoted": "Gesponsord",
+  "Campaigns": "Campagnes",
+  "Create campaign": "Campagne maken",
+  "Manage the full site.": "Beheer de hele site.",
+  "Roles, moderation, support tickets and takedowns in one production console.": "Rollen, moderatie, supporttickets en takedowns in een productieconsole.",
+  "Moderation": "Moderatie",
+  "Users": "Gebruikers",
+  "Role": "Rol",
+  "Plan": "Plan",
+  "Badge": "Badge",
+  "Verified artist": "Geverifieerde artiest",
+  "Pro": "Pro",
+  "Label": "Label",
+  "Apply crop": "Crop toepassen",
+  "Edit crop": "Crop bewerken",
+  "Preset": "Preset",
+  "Avatar": "Avatar",
+  "Cover square": "Vierkante cover",
+  "Story": "Story",
+  "Banner": "Banner",
+  "Custom": "Aangepast",
+  "Width": "Breedte",
+  "Height": "Hoogte",
+  "Zoom": "Zoom",
+  "Remove image": "Afbeelding verwijderen",
+  "Logo / profile picture": "Logo / profielfoto",
+  "Brand assets": "Merkassets",
+  "Catalog health": "Catalogusstatus",
+  "Review catalog": "Catalogus bekijken",
+  "Open analytics": "Analytics openen",
+  "live drops": "live drops",
+  "free gate(s)": "gratis gate(s)",
+  "paid release(s)": "betaalde release(s)",
+  "rights checks active.": "rechtenchecks actief."
+});
+
+Object.assign(TRANSLATIONS.de, {
+  "Information": "Information",
+  "Signed in as": "Angemeldet als",
+  "Staff panel": "Staff-Panel",
+  "View all notifications": "Alle Benachrichtigungen ansehen",
+  "Artist index": "Kunstlerindex",
+  "Browse catalog": "Katalog ansehen",
+  "Production catalog, gates and checkout are live": "Produktionskatalog, Gates und Checkout sind live",
+  "Trending by genre": "Trends nach Genre",
+  "Based on what you like": "Basierend auf deinen Likes",
+  "Artists to follow": "Kunstler zum Folgen",
+  "Explore ->": "Entdecken ->",
+  "Top 100 ->": "Top 100 ->",
+  "Top 100, plays, downloads and countries.": "Top 100, Plays, Downloads und Lander.",
+  "Top countries": "Top Lander",
+  "Top downloads": "Top Downloads",
+  "Top plays": "Top Plays",
+  "Recently listened": "Zuletzt gehort",
+  "Listening history": "Horverlauf",
+  "Recommended for you": "Empfohlen fur dich",
+  "Promoted": "Gesponsert",
+  "Campaigns": "Kampagnen",
+  "Create campaign": "Kampagne erstellen",
+  "Manage the full site.": "Verwalte die gesamte Site.",
+  "Roles, moderation, support tickets and takedowns in one production console.": "Rollen, Moderation, Supporttickets und Takedowns in einer Produktionskonsole.",
+  "Moderation": "Moderation",
+  "Users": "Nutzer",
+  "Role": "Rolle",
+  "Plan": "Plan",
+  "Badge": "Badge",
+  "Verified artist": "Verifizierter Kunstler",
+  "Pro": "Pro",
+  "Label": "Label",
+  "Apply crop": "Crop anwenden",
+  "Edit crop": "Crop bearbeiten",
+  "Preset": "Preset",
+  "Avatar": "Avatar",
+  "Cover square": "Quadratisches Cover",
+  "Story": "Story",
+  "Banner": "Banner",
+  "Custom": "Custom",
+  "Width": "Breite",
+  "Height": "Hohe",
+  "Zoom": "Zoom",
+  "Remove image": "Bild entfernen",
+  "Logo / profile picture": "Logo / Profilbild",
+  "Brand assets": "Brand Assets",
+  "Catalog health": "Katalogstatus",
+  "Review catalog": "Katalog ansehen",
+  "Open analytics": "Analytics offnen",
+  "live drops": "Live Drops",
+  "free gate(s)": "Gratis Gate(s)",
+  "paid release(s)": "bezahlte Release(s)",
+  "rights checks active.": "Rechtechecks aktiv."
+});
+
 const originalTextNodes = new WeakMap();
 const originalAttributes = new WeakMap();
 let activeTranslationLanguage = "en";
@@ -813,14 +996,30 @@ function translateValue(value, lang) {
   if (trusted) return preserveSpacing(value, `${dict["Trusted by"] || "Trusted by"} ${trusted[1]} ${dict["independent artists and DJs."] || "independent artists and DJs."}`);
   const plays = trimmed.match(/^(.+)\splays$/);
   if (plays) return preserveSpacing(value, `${plays[1]} ${dict.plays || "plays"}`);
+  const downloads = trimmed.match(/^(.+)\sdownloads$/i);
+  if (downloads) return preserveSpacing(value, `${downloads[1]} ${dict.downloads || "downloads"}`);
   const followers = trimmed.match(/^(.+)\sfollowers$/);
   if (followers) return preserveSpacing(value, `${followers[1]} ${dict.followers || "followers"}`);
+  const followersFr = trimmed.match(/^(.+)\sabonnes$/);
+  if (followersFr && dict.followers) return preserveSpacing(value, `${followersFr[1]} ${dict.followers}`);
   const releases = trimmed.match(/^(.+)\sreleases$/);
   if (releases) return preserveSpacing(value, `${releases[1]} ${dict.releases || "releases"}`);
+  const releaseCount = trimmed.match(/^(.+)\ssorties$/);
+  if (releaseCount && dict.releases) return preserveSpacing(value, `${releaseCount[1]} ${dict.releases}`);
   const tracks = trimmed.match(/^(.+)\strack\(s\)$/);
   if (tracks) return preserveSpacing(value, `${tracks[1]} ${dict["track(s)"] || "track(s)"}`);
   const tracksLong = trimmed.match(/^(.+)\strack\(s\)\s-\s(.+)$/);
   if (tracksLong) return preserveSpacing(value, `${tracksLong[1]} ${dict["track(s)"] || "track(s)"} - ${tracksLong[2]}`);
+  const freeGates = trimmed.match(/^(.+)\sfree gate\(s\)$/i);
+  if (freeGates) return preserveSpacing(value, `${freeGates[1]} ${dict["free gate(s)"] || "free gate(s)"}`);
+  const paidReleases = trimmed.match(/^(.+)\spaid release\(s\)$/i);
+  if (paidReleases) return preserveSpacing(value, `${paidReleases[1]} ${dict["paid release(s)"] || "paid release(s)"}`);
+  const liveDrops = trimmed.match(/^(.+)\slive drops$/i);
+  if (liveDrops) return preserveSpacing(value, `${liveDrops[1]} ${dict["live drops"] || "live drops"}`);
+  const catalogHealth = trimmed.match(/^(.+)\sfree gate\(s\),\s(.+)\spaid release\(s\),\srights checks active\.$/i);
+  if (catalogHealth) {
+    return preserveSpacing(value, `${catalogHealth[1]} ${dict["free gate(s)"] || "free gate(s)"}, ${catalogHealth[2]} ${dict["paid release(s)"] || "paid release(s)"}, ${dict["rights checks active."] || "rights checks active."}`);
+  }
   const buy = trimmed.match(/^Buy\s(.+)$/);
   if (buy) return preserveSpacing(value, `${dict.Buy || "Buy"} ${buy[1]}`);
   const notifications = trimmed.match(/^(\d+)\sNotifications$/);
@@ -2221,16 +2420,20 @@ function Topbar({ notify }) {
 function InfoMenu({ notify }) {
   const [open, setOpen] = useState(false);
   const menuRef = useCloseOnOutsideClick(open, () => setOpen(false));
+  const closeAndNotify = (message) => {
+    setOpen(false);
+    notify(message);
+  };
   return (
     <div className="dropdown" ref={menuRef}>
       <button className="icon-button" onClick={() => setOpen((value) => !value)} aria-label="Open information menu"><Info size={17} /></button>
       {open && (
         <div className="dropdown-panel">
           <b>Information</b>
-          <button onClick={() => notify("Help center opened.")}><HelpCircle size={15} /> Help Center</button>
-          <button onClick={() => notify("Documentation opened.")}><FileText size={15} /> Documentation</button>
-          <button onClick={() => notify("Community panel opened.")}><Users size={15} /> Community</button>
-          <button onClick={() => notify("System status: services are online.")}><Settings size={15} /> System Status</button>
+          <button onClick={() => closeAndNotify("Help center opened.")}><HelpCircle size={15} /> Help Center</button>
+          <button onClick={() => closeAndNotify("Documentation opened.")}><FileText size={15} /> Documentation</button>
+          <button onClick={() => closeAndNotify("Community panel opened.")}><Users size={15} /> Community</button>
+          <button onClick={() => closeAndNotify("System status: services are online.")}><Settings size={15} /> System Status</button>
         </div>
       )}
     </div>
@@ -2241,6 +2444,10 @@ function NotificationMenu({ notify }) {
   const [open, setOpen] = useState(false);
   const menuRef = useCloseOnOutsideClick(open, () => setOpen(false));
   const [selected, setSelected] = useState("all");
+  const closeAndNotify = (message) => {
+    setOpen(false);
+    notify(message);
+  };
   const notes = [
     { id: "1", category: "updates", icon: Info, title: "Catalog update", description: "A new analytics view has been deployed.", time: "just now" },
     { id: "2", category: "alerts", icon: AlertTriangle, title: "Artwork missing", description: "One release needs final cover artwork.", time: "1h ago" },
@@ -2262,7 +2469,7 @@ function NotificationMenu({ notify }) {
             {filtered.length === 0 ? <p>No notifications in this category</p> : filtered.map((item) => {
               const Icon = item.icon;
               return (
-                <button key={item.id} onClick={() => notify(item.description)}>
+                <button key={item.id} onClick={() => closeAndNotify(item.description)}>
                   <span><Icon size={15} /><strong>{item.title}</strong></span>
                   <small>{item.time}</small>
                   <em>{item.description}</em>
@@ -2270,7 +2477,7 @@ function NotificationMenu({ notify }) {
               );
             })}
           </div>
-          <button onClick={() => notify("All notifications marked as read.")}>View all notifications</button>
+          <button onClick={() => closeAndNotify("All notifications marked as read.")}>View all notifications</button>
         </div>
       )}
     </div>
@@ -2280,6 +2487,11 @@ function NotificationMenu({ notify }) {
 function UserMenu({ user, logout }) {
   const [open, setOpen] = useState(false);
   const menuRef = useCloseOnOutsideClick(open, () => setOpen(false));
+  const closeMenu = () => setOpen(false);
+  const logoutAndClose = () => {
+    setOpen(false);
+    logout();
+  };
   return (
     <div className="dropdown" ref={menuRef}>
       <button className="icon-button user-trigger" onClick={() => setOpen((value) => !value)} aria-label="Open account menu">
@@ -2289,13 +2501,13 @@ function UserMenu({ user, logout }) {
       {open && (
         <div className="dropdown-panel">
           <b>Signed in as <small>{user.email}</small></b>
-          <a href={artistPath(user)}>Profile</a>
-          <a href="#/settings">Settings</a>
-          <a href="#/dashboard">Dashboard</a>
-          <a href="#/catalog">Catalog</a>
-          {["staff", "moderator", "admin"].includes(user.role) && <a href="#/staff">Staff panel</a>}
-          <a href="#/payouts">Payouts</a>
-          <button onClick={logout}><LogOut size={15} /> Logout</button>
+          <a href={artistPath(user)} onClick={closeMenu}>Profile</a>
+          <a href="#/settings" onClick={closeMenu}>Settings</a>
+          <a href="#/dashboard" onClick={closeMenu}>Dashboard</a>
+          <a href="#/catalog" onClick={closeMenu}>Catalog</a>
+          {["staff", "moderator", "admin"].includes(user.role) && <a href="#/staff" onClick={closeMenu}>Staff panel</a>}
+          <a href="#/payouts" onClick={closeMenu}>Payouts</a>
+          <button onClick={logoutAndClose}><LogOut size={15} /> Logout</button>
         </div>
       )}
     </div>
@@ -4010,7 +4222,7 @@ async function editImageFile(file, options) {
     await image.decode();
     const width = Math.max(64, Number(options.width) || image.naturalWidth);
     const height = Math.max(64, Number(options.height) || image.naturalHeight);
-    const zoom = Math.max(.2, Number(options.zoom) || 1);
+    const zoom = Math.max(1, Number(options.zoom) || 1);
     const canvas = document.createElement("canvas");
     canvas.width = width;
     canvas.height = height;
@@ -4019,8 +4231,8 @@ async function editImageFile(file, options) {
     const scale = Math.max(width / image.naturalWidth, height / image.naturalHeight) * zoom;
     const drawWidth = image.naturalWidth * scale;
     const drawHeight = image.naturalHeight * scale;
-    const x = (width - drawWidth) / 2 + (Number(options.offsetX) || 0);
-    const y = (height - drawHeight) / 2 + (Number(options.offsetY) || 0);
+    const x = (width - drawWidth) / 2 + (Number(options.panX) || 0);
+    const y = (height - drawHeight) / 2 + (Number(options.panY) || 0);
     ctx.drawImage(image, x, y, drawWidth, drawHeight);
     const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/webp", .92));
     const name = file.name.replace(/\.[^.]+$/, "") || "image";
@@ -4032,25 +4244,95 @@ async function editImageFile(file, options) {
 
 function ImageUploadPanel({ file, setFile, title = "Image upload", text = "Upload a JPG, PNG or WebP image.", defaultWidth = 1200, defaultHeight = 1200 }) {
   const fileInputId = useId();
+  const cropRef = useRef(null);
+  const dragRef = useRef(null);
   const [sourceFile, setSourceFile] = useState(null);
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [settings, setSettings] = useState({ width: defaultWidth, height: defaultHeight, zoom: 1, offsetX: 0, offsetY: 0 });
-  const preview = file ? URL.createObjectURL(file) : "";
-  useEffect(() => () => { if (preview) URL.revokeObjectURL(preview); }, [preview]);
+  const [settings, setSettings] = useState({ width: defaultWidth, height: defaultHeight, zoom: 1, panX: 0, panY: 0 });
+  const [preview, setPreview] = useState("");
+  useEffect(() => {
+    if (!file) {
+      setPreview("");
+      return undefined;
+    }
+    const previewUrl = URL.createObjectURL(file);
+    setPreview(previewUrl);
+    return () => URL.revokeObjectURL(previewUrl);
+  }, [file]);
   const updateSetting = (key, value) => setSettings((current) => ({ ...current, [key]: value }));
+  const cropPresets = [
+    { value: "avatar", label: "Avatar", width: 800, height: 800 },
+    { value: "square", label: "Cover square", width: 1400, height: 1400 },
+    { value: "story", label: "Story", width: 1080, height: 1920 },
+    { value: "banner", label: "Banner", width: 1920, height: 640 }
+  ];
+  const selectedPreset = cropPresets.find((preset) => preset.width === Number(settings.width) && preset.height === Number(settings.height))?.value || "custom";
+  const resetSettings = () => setSettings({ width: defaultWidth, height: defaultHeight, zoom: 1, panX: 0, panY: 0 });
+  const clampPan = (panX, panY, zoom) => {
+    const rect = cropRef.current?.getBoundingClientRect();
+    if (!rect) return { panX, panY };
+    const nextZoom = Math.max(1, Number(zoom) || 1);
+    const maxX = Math.max(0, (rect.width * (nextZoom - 1)) / 2);
+    const maxY = Math.max(0, (rect.height * (nextZoom - 1)) / 2);
+    return {
+      panX: Math.min(maxX, Math.max(-maxX, Number(panX) || 0)),
+      panY: Math.min(maxY, Math.max(-maxY, Number(panY) || 0))
+    };
+  };
+  const choosePreset = (value) => {
+    const preset = cropPresets.find((item) => item.value === value);
+    if (!preset) return;
+    setSettings((current) => ({ ...current, width: preset.width, height: preset.height, panX: 0, panY: 0 }));
+  };
+  const updateZoom = (value) => {
+    setSettings((current) => {
+      const zoom = Math.max(1, Number(value) || 1);
+      return { ...current, zoom, ...clampPan(current.panX, current.panY, zoom) };
+    });
+  };
   const chooseFile = (event) => {
     const nextFile = event.target.files?.[0] || null;
     setSourceFile(nextFile);
     setFile(nextFile);
     setEditing(!!nextFile);
-    setSettings({ width: defaultWidth, height: defaultHeight, zoom: 1, offsetX: 0, offsetY: 0 });
+    resetSettings();
   };
+  const stopDrag = () => {
+    dragRef.current = null;
+    window.removeEventListener("pointermove", moveDrag);
+    window.removeEventListener("pointerup", stopDrag);
+  };
+  const moveDrag = (event) => {
+    if (!dragRef.current) return;
+    const deltaX = event.clientX - dragRef.current.x;
+    const deltaY = event.clientY - dragRef.current.y;
+    setSettings((current) => {
+      const pan = clampPan(dragRef.current.panX + deltaX, dragRef.current.panY + deltaY, current.zoom);
+      return { ...current, ...pan };
+    });
+  };
+  const startDrag = (event) => {
+    if (!preview) return;
+    event.preventDefault();
+    dragRef.current = { x: event.clientX, y: event.clientY, panX: Number(settings.panX) || 0, panY: Number(settings.panY) || 0 };
+    window.addEventListener("pointermove", moveDrag);
+    window.addEventListener("pointerup", stopDrag);
+  };
+  useEffect(() => () => stopDrag(), []);
   const applyEdit = async () => {
     if (!sourceFile && !file) return;
     setBusy(true);
     try {
-      setFile(await editImageFile(sourceFile || file, settings));
+      const rect = cropRef.current?.getBoundingClientRect();
+      const panScaleX = rect?.width ? Number(settings.width) / rect.width : 1;
+      const panScaleY = rect?.height ? Number(settings.height) / rect.height : 1;
+      const outputSettings = {
+        ...settings,
+        panX: (Number(settings.panX) || 0) * panScaleX,
+        panY: (Number(settings.panY) || 0) * panScaleY
+      };
+      setFile(await editImageFile(sourceFile || file, outputSettings));
       setEditing(false);
     } finally {
       setBusy(false);
@@ -4070,15 +4352,36 @@ function ImageUploadPanel({ file, setFile, title = "Image upload", text = "Uploa
         <input id={fileInputId} type="file" accept="image/png,image/jpeg,image/webp,image/gif" onChange={chooseFile} />
       </label>
       {file && editing && (
-        <div className="image-edit-controls">
-          <label>Width<input type="number" min="64" max="4000" value={settings.width} onChange={(e) => updateSetting("width", e.target.value)} /></label>
-          <label>Height<input type="number" min="64" max="4000" value={settings.height} onChange={(e) => updateSetting("height", e.target.value)} /></label>
-          <label>Zoom<input type="range" min=".5" max="3" step=".05" value={settings.zoom} onChange={(e) => updateSetting("zoom", e.target.value)} /></label>
-          <label>X<input type="number" value={settings.offsetX} onChange={(e) => updateSetting("offsetX", e.target.value)} /></label>
-          <label>Y<input type="number" value={settings.offsetY} onChange={(e) => updateSetting("offsetY", e.target.value)} /></label>
-          <button className="button accent" type="button" onClick={applyEdit} disabled={busy}>{busy ? <Loader2 className="spin" size={16} /> : <Settings size={16} />} Apply resize</button>
+        <div className="image-cropper">
+          <div
+            ref={cropRef}
+            className="image-crop-stage"
+            style={{ aspectRatio: `${Math.max(64, Number(settings.width) || defaultWidth)} / ${Math.max(64, Number(settings.height) || defaultHeight)}` }}
+            onPointerDown={startDrag}
+          >
+            <img
+              src={preview}
+              alt=""
+              draggable="false"
+              style={{ transform: `translate(${Number(settings.panX) || 0}px, ${Number(settings.panY) || 0}px) scale(${Number(settings.zoom) || 1})` }}
+            />
+            <span className="crop-grid" />
+            <span className="crop-ring" />
+          </div>
+          <div className="image-edit-controls">
+            <label>Preset<select value={selectedPreset} onChange={(e) => choosePreset(e.target.value)}>
+              {cropPresets.map((preset) => <option key={preset.value} value={preset.value}>{preset.label}</option>)}
+              <option value="custom">Custom</option>
+            </select></label>
+            <label>Width<input type="number" min="64" max="4000" value={settings.width} onChange={(e) => updateSetting("width", e.target.value)} /></label>
+            <label>Height<input type="number" min="64" max="4000" value={settings.height} onChange={(e) => updateSetting("height", e.target.value)} /></label>
+            <label>Zoom<input type="range" min="1" max="4" step=".05" value={settings.zoom} onChange={(e) => updateZoom(e.target.value)} /></label>
+            <button className="button accent" type="button" onClick={applyEdit} disabled={busy}>{busy ? <Loader2 className="spin" size={16} /> : <Settings size={16} />} Apply crop</button>
+            <button className="button ghost" type="button" onClick={resetSettings}>Reset</button>
+          </div>
         </div>
       )}
+      {file && !editing && <button className="button ghost" type="button" onClick={() => { setSourceFile(file); setEditing(true); }}><Settings size={16} /> Edit crop</button>}
       {file && <button className="button ghost" type="button" onClick={removeImage}><Trash size={16} /> Remove image</button>}
     </section>
   );
