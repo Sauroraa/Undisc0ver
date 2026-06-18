@@ -3208,6 +3208,184 @@ textarea { min-height: 120px; resize: vertical; }
 .copyright-console-stats b {
   color: var(--accent);
 }
+.catalog-manager {
+  background: rgba(20,20,32,.72);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  display: grid;
+  gap: 16px;
+  padding: 18px;
+}
+.catalog-manager-head {
+  align-items: center;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+}
+.catalog-manager-head h2,
+.catalog-manager-head p {
+  margin: 0;
+}
+.catalog-manager-head p:not(.label) {
+  color: var(--muted);
+  margin-top: 5px;
+}
+.catalog-manager-list {
+  display: grid;
+  gap: 12px;
+}
+.catalog-release-card {
+  background: rgba(255,255,255,.025);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.catalog-release-summary {
+  align-items: center;
+  display: grid;
+  gap: 14px;
+  grid-template-columns: 74px minmax(0, 1fr) auto auto;
+  padding: 14px;
+}
+.catalog-release-summary .pack-art {
+  border-radius: 10px;
+  height: 74px;
+  width: 74px;
+}
+.catalog-release-main {
+  min-width: 0;
+}
+.catalog-release-titleline {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.catalog-release-titleline h3 {
+  font-size: 18px;
+  margin: 0;
+}
+.catalog-release-main p {
+  color: var(--muted);
+  margin: 4px 0 0;
+}
+.catalog-release-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 8px;
+}
+.catalog-release-meta span,
+.visibility-pill {
+  background: var(--base);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 850;
+  padding: 5px 8px;
+  text-transform: uppercase;
+}
+.visibility-pill.public {
+  border-color: rgba(44,255,143,.35);
+  color: var(--success);
+}
+.visibility-pill.unlisted {
+  border-color: rgba(212,232,87,.4);
+  color: var(--accent);
+}
+.visibility-pill.private {
+  border-color: rgba(255,91,111,.35);
+  color: var(--danger);
+}
+.catalog-release-stats {
+  display: grid;
+  gap: 5px;
+  min-width: 128px;
+}
+.catalog-release-stats span {
+  color: var(--muted);
+  font-size: 12px;
+}
+.catalog-release-stats b {
+  color: white;
+  font-family: "SFMono-Regular", Consolas, monospace;
+}
+.catalog-release-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+.catalog-release-actions .button {
+  min-height: 38px;
+}
+.button.danger {
+  border-color: rgba(255,91,111,.28);
+  color: #ff8d9c;
+}
+.button.danger:hover {
+  border-color: rgba(255,91,111,.55);
+}
+.catalog-edit-form {
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+}
+.catalog-edit-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.catalog-edit-form label {
+  color: var(--muted);
+  display: grid;
+  font-size: 12px;
+  font-weight: 850;
+  gap: 7px;
+}
+.catalog-edit-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.catalog-edit-toggles label {
+  align-items: center;
+  background: var(--base);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: white;
+  display: flex;
+  gap: 8px;
+  padding: 9px 12px;
+}
+.catalog-edit-toggles input {
+  min-height: auto;
+}
+.catalog-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+.catalog-edit-form .image-upload-card {
+  background: var(--base);
+  border-color: var(--line);
+}
+.empty-state {
+  align-items: center;
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  color: var(--muted);
+  display: grid;
+  gap: 8px;
+  justify-items: center;
+  min-height: 150px;
+  padding: 24px;
+  text-align: center;
+}
+.empty-state strong {
+  color: white;
+}
 
 .dashboard-nav {
   align-items: center;
@@ -5866,6 +6044,26 @@ textarea { min-height: 120px; resize: vertical; }
 @media (max-width: 900px) {
   .release-marquee-cta,
   .dashboard-shell {
+    grid-template-columns: 1fr;
+  }
+  .catalog-release-summary {
+    grid-template-columns: 64px minmax(0, 1fr);
+  }
+  .catalog-release-summary .pack-art {
+    height: 64px;
+    width: 64px;
+  }
+  .catalog-release-stats,
+  .catalog-release-actions {
+    grid-column: 1 / -1;
+  }
+  .catalog-release-stats {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .catalog-release-actions {
+    justify-content: flex-start;
+  }
+  .catalog-edit-grid {
     grid-template-columns: 1fr;
   }
   .release-detail-page {

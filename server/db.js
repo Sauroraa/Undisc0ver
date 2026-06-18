@@ -235,6 +235,7 @@ export function initDb() {
   addReleaseColumn("audio_size", "INTEGER NOT NULL DEFAULT 0");
   addReleaseColumn("track_files", "TEXT NOT NULL DEFAULT '[]'");
   addReleaseColumn("cover_url", "TEXT NOT NULL DEFAULT ''");
+  addReleaseColumn("featured_artist", "TEXT NOT NULL DEFAULT ''");
   addReleaseColumn("visibility", "TEXT NOT NULL DEFAULT 'public'");
 
   const isProduction = process.env.NODE_ENV === "production";

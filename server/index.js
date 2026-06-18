@@ -545,7 +545,7 @@ function normalizeGateActions(actions = []) {
 }
 
 app.post("/api/releases", auth, (req, res) => {
-  const { title, kind, genre, tracks, duration, price, free, gate, gate_actions = [], description, rights_confirmed, rights_owner, download_enabled = true, audio_url = "", audio_file_name = "", audio_mime = "", audio_size = 0, track_files = [], cover_url = "", visibility = "public" } = req.body;
+  const { title, kind, genre, tracks, duration, price, free, gate, gate_actions = [], description, rights_confirmed, rights_owner, download_enabled = true, audio_url = "", audio_file_name = "", audio_mime = "", audio_size = 0, track_files = [], cover_url = "", featured_artist = "", visibility = "public" } = req.body;
   if (!title || !kind || !genre) return res.status(400).json({ error: "Titre, type et genre sont requis." });
   if (!audio_url) return res.status(400).json({ error: "Upload audio requis avant publication." });
   if (!rights_confirmed) return res.status(400).json({ error: "Confirmation des droits requise avant publication." });
@@ -559,8 +559,8 @@ app.post("/api/releases", auth, (req, res) => {
   const moderationStatus = moderationFromScan(scan);
   const releaseVisibility = ["public", "private", "unlisted"].includes(String(visibility).toLowerCase()) ? String(visibility).toLowerCase() : "public";
   db.prepare(`INSERT INTO releases (id, user_id, title, kind, genre, tracks, duration, price_cents, free, gate, gate_actions, description, color, download_enabled,
-      rights_confirmed, rights_owner, scan_status, scan_provider, scan_score, scan_match_title, scan_notes, moderation_status, audio_url, audio_file_name, audio_mime, audio_size, track_files, cover_url, visibility)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      rights_confirmed, rights_owner, scan_status, scan_provider, scan_score, scan_match_title, scan_notes, moderation_status, audio_url, audio_file_name, audio_mime, audio_size, track_files, cover_url, featured_artist, visibility)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
     .run(
       releaseId,
       req.user.id,
@@ -590,12 +590,70 @@ app.post("/api/releases", auth, (req, res) => {
       Number(audio_size) || 0,
       JSON.stringify(Array.isArray(track_files) ? track_files.slice(0, 30) : []),
       String(cover_url || ""),
+      String(featured_artist || "").trim(),
       releaseVisibility
     );
   db.prepare("INSERT INTO copyright_scans (id, release_id, provider, status, score, match_title, raw_json) VALUES (?, ?, ?, ?, ?, ?, ?)")
     .run(id("scan"), releaseId, scan.provider, scan.status, scan.score, scan.match_title, JSON.stringify(scan));
   const release = db.prepare(releaseSelect("WHERE r.id = ?", "r.created_at DESC")).get(releaseId);
   res.json({ release: presentRelease(release), scan });
+});
+
+function canManageRelease(user, release) {
+  return release.user_id === user.id || ["staff", "moderator", "admin"].includes(user.role);
+}
+
+app.patch("/api/releases/:id", auth, (req, res) => {
+  const release = db.prepare("SELECT * FROM releases WHERE id = ? AND moderation_status != 'removed'").get(req.params.id);
+  if (!release) return res.status(404).json({ error: "Release introuvable." });
+  if (!canManageRelease(req.user, release)) return res.status(403).json({ error: "Permission insuffisante." });
+
+  const next = { ...release, ...req.body };
+  const title = String(next.title || "").trim();
+  const kind = String(next.kind || "Track").trim();
+  const genre = String(next.genre || "Electronic").trim();
+  if (!title || !kind || !genre) return res.status(400).json({ error: "Titre, type et genre sont requis." });
+
+  const downloadEnabled = next.download_enabled ? 1 : 0;
+  const normalizedGateActions = downloadEnabled ? normalizeGateActions(next.gate_actions) : [];
+  const gateLabel = normalizedGateActions.length
+    ? normalizedGateActions.map((action) => `${action} required`).join(", ")
+    : downloadEnabled ? "No gate" : "Downloads disabled";
+  const visibility = ["public", "private", "unlisted"].includes(String(next.visibility).toLowerCase()) ? String(next.visibility).toLowerCase() : "public";
+  const isFree = next.free ? 1 : 0;
+
+  db.prepare(`UPDATE releases
+    SET title = ?, kind = ?, genre = ?, tracks = ?, duration = ?, price_cents = ?, free = ?, gate = ?, gate_actions = ?,
+        description = ?, download_enabled = ?, cover_url = ?, featured_artist = ?, visibility = ?
+    WHERE id = ?`)
+    .run(
+      title,
+      kind,
+      genre,
+      Math.max(1, Number(next.tracks) || 1),
+      String(next.duration || "00:00").trim(),
+      isFree ? 0 : cents(next.price || Number(next.price_cents || 0) / 100) * 100,
+      isFree,
+      gateLabel,
+      JSON.stringify(normalizedGateActions),
+      String(next.description || "").trim(),
+      downloadEnabled,
+      String(next.cover_url || "").trim(),
+      String(next.featured_artist || "").trim(),
+      visibility,
+      req.params.id
+    );
+
+  const updated = db.prepare(releaseSelect("WHERE r.id = ?", "r.created_at DESC")).get(req.params.id);
+  res.json({ release: presentRelease(updated) });
+});
+
+app.delete("/api/releases/:id", auth, (req, res) => {
+  const release = db.prepare("SELECT * FROM releases WHERE id = ? AND moderation_status != 'removed'").get(req.params.id);
+  if (!release) return res.status(404).json({ error: "Release introuvable." });
+  if (!canManageRelease(req.user, release)) return res.status(403).json({ error: "Permission insuffisante." });
+  db.prepare("UPDATE releases SET moderation_status = 'removed', visibility = 'private' WHERE id = ?").run(req.params.id);
+  res.json({ ok: true });
 });
 
 app.post("/api/releases/:id/report", (req, res) => {

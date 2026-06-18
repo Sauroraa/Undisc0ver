@@ -1803,6 +1803,11 @@ function App() {
     setTimeout(() => setToast(""), 2600);
   };
   const playRelease = (release) => {
+    if (!release?.id) return;
+    if (!release.audio_url) {
+      notify("Audio indisponible pour cette sortie.");
+      return;
+    }
     setNowPlaying(release);
     setIsPlaying(true);
     request(`/releases/${release.id}/listen`, { method: "POST" }).catch(() => {});
@@ -5171,7 +5176,9 @@ function DashboardHero({ user, stats }) {
 
 function Dashboard({ section, notify, playRelease }) {
   const { user } = useAuth();
-  const { data, loading, error } = useData("/dashboard", [user?.id]);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const refreshDashboard = () => setRefreshKey((value) => value + 1);
+  const { data, loading, error } = useData("/dashboard", [user?.id, refreshKey]);
   if (!user) return <AuthRequired />;
   if (loading) return <main className="page"><SkeletonList /></main>;
   if (error) return <ErrorPage message={error} />;
@@ -5209,7 +5216,7 @@ function Dashboard({ section, notify, playRelease }) {
           {section === "catalog" && (
             <>
               <CopyrightConsole releases={releases} />
-              <ReleaseRows releases={releases} notify={notify} playRelease={playRelease} showModeration />
+              <DashboardCatalogManager releases={releases} notify={notify} playRelease={playRelease} onRefresh={refreshDashboard} />
             </>
           )}
           {section === "analytics" && <Analytics releases={releases} stats={stats} />}
@@ -5237,6 +5244,161 @@ function CopyrightConsole({ releases }) {
         <span><b>{blockedCount}</b> blocked</span>
       </div>
     </section>
+  );
+}
+
+function DashboardCatalogManager({ releases, notify, playRelease, onRefresh }) {
+  const [editingId, setEditingId] = useState("");
+  const [deletingId, setDeletingId] = useState("");
+  const deleteRelease = async (release) => {
+    if (!confirm(`Supprimer "${release.title}" du catalogue ?`)) return;
+    setDeletingId(release.id);
+    try {
+      await request(`/releases/${release.id}`, { method: "DELETE" });
+      notify("Sortie supprimee.");
+      onRefresh();
+    } catch (err) {
+      notify(err.message);
+    } finally {
+      setDeletingId("");
+    }
+  };
+
+  return (
+    <section className="catalog-manager">
+      <div className="catalog-manager-head">
+        <div>
+          <p className="label">Catalogue artiste</p>
+          <h2>Tous tes sons uploades</h2>
+          <p>Modifie la cover, les credits, la description, le prix et la visibilite sans repasser par l'upload.</p>
+        </div>
+        <a className="button accent" href="#/upload"><Upload size={16} /> Ajouter</a>
+      </div>
+      {!releases.length ? (
+        <div className="empty-state">
+          <Music2 size={22} />
+          <strong>Aucun son publie pour le moment.</strong>
+          <span>Upload ton premier track, EP ou dubpack pour le voir ici.</span>
+        </div>
+      ) : (
+        <div className="catalog-manager-list">
+          {releases.map((release) => (
+            <article className="catalog-release-card" key={release.id}>
+              <div className="catalog-release-summary">
+                <PackArtwork release={release} />
+                <div className="catalog-release-main">
+                  <div className="catalog-release-titleline">
+                    <h3>{release.title}</h3>
+                    <span className={`visibility-pill ${release.visibility || "public"}`}>{visibilityLabel(release.visibility)}</span>
+                    <ModerationBadge release={release} />
+                  </div>
+                  <p>{release.artist}{release.featured_artist ? ` avec ${release.featured_artist}` : ""}</p>
+                  <div className="catalog-release-meta">
+                    <span>{release.kind}</span>
+                    <span>{release.genre}</span>
+                    <span>{release.duration}</span>
+                    <span>{release.free ? "Gratuit" : money(release.price_cents)}</span>
+                  </div>
+                </div>
+                <div className="catalog-release-stats">
+                  <span><b>{shortNumber(release.plays)}</b> plays</span>
+                  <span><b>{shortNumber(release.downloads)}</b> downloads</span>
+                  <span><b>{shortNumber(release.likes)}</b> likes</span>
+                </div>
+                <div className="catalog-release-actions">
+                  <button className="button icon-button" type="button" onClick={() => playRelease(release)} aria-label={`Play ${release.title}`}><Play size={16} fill="currentColor" /></button>
+                  <a className="button ghost" href={`#/release/${release.id}`}><ExternalLink size={16} /> Voir</a>
+                  <button className="button ghost" type="button" onClick={() => setEditingId(editingId === release.id ? "" : release.id)}><Settings size={16} /> Modifier</button>
+                  <button className="button ghost danger" type="button" onClick={() => deleteRelease(release)} disabled={deletingId === release.id}>{deletingId === release.id ? <Loader2 className="spin" size={16} /> : <Trash size={16} />} Supprimer</button>
+                </div>
+              </div>
+              {editingId === release.id && (
+                <ReleaseEditForm
+                  release={release}
+                  notify={notify}
+                  onDone={() => {
+                    setEditingId("");
+                    onRefresh();
+                  }}
+                />
+              )}
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function visibilityLabel(value = "public") {
+  if (value === "private") return "Privee";
+  if (value === "unlisted") return "Non repertoriee";
+  return "Public";
+}
+
+function ReleaseEditForm({ release, notify, onDone }) {
+  const [form, setForm] = useState(() => ({
+    title: release.title || "",
+    featured_artist: release.featured_artist || "",
+    description: release.description || "",
+    kind: release.kind || "Track",
+    genre: release.genre || "Tech House",
+    tracks: release.tracks || 1,
+    duration: release.duration || "00:00",
+    free: !!release.free,
+    price: Number(release.price_cents || 0) / 100,
+    download_enabled: release.download_enabled !== 0,
+    visibility: release.visibility || "public",
+    cover_url: release.cover_url || ""
+  }));
+  const [coverFile, setCoverFile] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const update = (key, value) => setForm((current) => ({ ...current, [key]: value }));
+  const save = async (event) => {
+    event.preventDefault();
+    setSaving(true);
+    try {
+      let coverUrl = form.cover_url;
+      if (coverFile) {
+        const uploaded = await uploadImage(coverFile);
+        coverUrl = uploaded.url;
+      }
+      await request(`/releases/${release.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ ...form, cover_url: coverUrl })
+      });
+      notify("Sortie sauvegardee.");
+      onDone();
+    } catch (err) {
+      notify(err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <form className="catalog-edit-form" onSubmit={save}>
+      <div className="catalog-edit-grid">
+        <label>Titre<input value={form.title} onChange={(e) => update("title", e.target.value)} required /></label>
+        <label>Artiste invite / collab<input value={form.featured_artist} onChange={(e) => update("featured_artist", e.target.value)} placeholder="ex: Julix, label, collectif..." /></label>
+        <label>Type<select value={form.kind} onChange={(e) => update("kind", e.target.value)}><option>Track</option><option>EP</option><option>Album</option><option>Dubpack</option><option>Sample pack</option></select></label>
+        <label>Genre<select value={form.genre} onChange={(e) => update("genre", e.target.value)}><option>Tech House</option><option>Techno</option><option>Melodic</option><option>Afro House</option><option>Drum & Bass</option><option>Hard Techno</option><option>Riddim</option><option>Dubstep</option><option>Electronic</option></select></label>
+        <label>Tracks<input type="number" min="1" value={form.tracks} onChange={(e) => update("tracks", e.target.value)} /></label>
+        <label>Duree<input value={form.duration} onChange={(e) => update("duration", e.target.value)} placeholder="03:42" /></label>
+        <label>Visibilite<select value={form.visibility} onChange={(e) => update("visibility", e.target.value)}><option value="public">Public</option><option value="unlisted">Non repertoriee</option><option value="private">Privee</option></select></label>
+        <label>Prix EUR<input type="number" min="0" step="0.01" value={form.price} disabled={form.free} onChange={(e) => update("price", e.target.value)} /></label>
+      </div>
+      <label>Description<textarea rows="4" value={form.description} onChange={(e) => update("description", e.target.value)} placeholder="Description du son, credits, liens, details..." /></label>
+      <div className="catalog-edit-toggles">
+        <label><input type="checkbox" checked={form.free} onChange={(e) => update("free", e.target.checked)} /> Gratuit</label>
+        <label><input type="checkbox" checked={form.download_enabled} onChange={(e) => update("download_enabled", e.target.checked)} /> Download actif</label>
+      </div>
+      <ImageUploadPanel file={coverFile} setFile={setCoverFile} title="Nouvelle cover" text="Choisir une cover JPG, PNG ou WebP." defaultWidth={1400} defaultHeight={1400} />
+      <label>Cover URL actuelle<input value={form.cover_url} onChange={(e) => update("cover_url", e.target.value)} placeholder="/uploads/cover.webp" /></label>
+      <div className="catalog-edit-actions">
+        <button className="button accent" type="submit" disabled={saving}>{saving ? <Loader2 className="spin" size={16} /> : <Check size={16} />} Sauvegarder</button>
+      </div>
+    </form>
   );
 }
 
