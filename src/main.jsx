@@ -56,6 +56,7 @@ import {
   Settings,
   ShieldAlert,
   ShieldCheck,
+  Sparkles,
   SquareArrowOutUpRight,
   Tag,
   Trash,
@@ -922,6 +923,58 @@ function shortNumber(value) {
   return String(value);
 }
 
+function parseDurationSeconds(value = "0:00") {
+  const parts = String(value || "0:00").split(":").map((part) => Number.parseInt(part, 10) || 0);
+  if (parts.length === 3) return (parts[0] * 3600) + (parts[1] * 60) + parts[2];
+  if (parts.length === 2) return (parts[0] * 60) + parts[1];
+  return parts[0] || 0;
+}
+
+function formatDuration(seconds = 0) {
+  const safeSeconds = Math.max(0, Math.floor(Number(seconds) || 0));
+  const minutes = Math.floor(safeSeconds / 60);
+  return `${minutes}:${String(safeSeconds % 60).padStart(2, "0")}`;
+}
+
+function fallbackWaveform(seed = "", count = 72) {
+  const text = String(seed || "undiscover");
+  return Array.from({ length: count }, (_, index) => {
+    const char = text.charCodeAt(index % text.length) || 17;
+    const pulse = Math.sin(index * .78) * 12;
+    return Math.max(14, Math.min(58, 28 + ((char + index * 19) % 24) + pulse));
+  });
+}
+
+async function audioUrlToWaveform(url, count = 72) {
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextClass || !url) return [];
+  const response = await fetch(url);
+  const arrayBuffer = await response.arrayBuffer();
+  const context = new AudioContextClass();
+  try {
+    const audioBuffer = await context.decodeAudioData(arrayBuffer);
+    const channelData = audioBuffer.getChannelData(0);
+    const samplesPerBar = Math.max(1, Math.floor(channelData.length / count));
+    const rawBars = Array.from({ length: count }, (_, index) => {
+      const start = index * samplesPerBar;
+      const end = Math.min(channelData.length, start + samplesPerBar);
+      let sum = 0;
+      let peak = 0;
+      for (let cursor = start; cursor < end; cursor += 1) {
+        const sample = Math.abs(channelData[cursor] || 0);
+        sum += sample * sample;
+        if (sample > peak) peak = sample;
+      }
+      const rms = Math.sqrt(sum / Math.max(1, end - start));
+      return (rms * .72) + (peak * .28);
+    });
+    const max = Math.max(...rawBars, .01);
+    return rawBars.map((value) => Math.max(10, Math.min(62, 10 + (value / max) * 52)));
+  } finally {
+    context.close?.();
+  }
+}
+
 function initials(value = "") {
   return String(value)
     .trim()
@@ -956,6 +1009,26 @@ function artistPath(artist = {}) {
 
 function artistPublicUrl(artist = {}) {
   return `https://undisc0ver.com/artist/${artistHandle(artist)}`;
+}
+
+function subscriptionValue(entity = {}) {
+  const value = String(entity.plan || entity.artist_plan || (entity.pro ? "pro" : "free")).toLowerCase();
+  return value === "creator" ? "free" : value;
+}
+
+function subscriptionLabel(entity = {}) {
+  const value = subscriptionValue(entity);
+  if (value === "label") return "Label";
+  if (value === "pro") return "Pro";
+  return "Free";
+}
+
+function staffRoleLabel(role = "") {
+  const value = String(role || "").toLowerCase();
+  if (value === "admin") return "Admin";
+  if (value === "moderator") return "Mod";
+  if (value === "staff") return "Staff";
+  return "";
 }
 
 function useCloseOnOutsideClick(open, onClose) {
@@ -1010,6 +1083,23 @@ async function uploadAudio(file) {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || "Erreur upload audio");
   return data.file;
+}
+
+function getAudioFileDuration(file) {
+  return new Promise((resolve, reject) => {
+    const audio = document.createElement("audio");
+    const url = URL.createObjectURL(file);
+    audio.preload = "metadata";
+    audio.src = url;
+    audio.onloadedmetadata = () => {
+      URL.revokeObjectURL(url);
+      resolve(Number.isFinite(audio.duration) ? audio.duration : 0);
+    };
+    audio.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("Audio metadata could not be read."));
+    };
+  });
 }
 
 async function uploadImage(file) {
@@ -1470,6 +1560,7 @@ function App() {
   const playRelease = (release) => {
     setNowPlaying(release);
     setIsPlaying(true);
+    request(`/releases/${release.id}/listen`, { method: "POST" }).catch(() => {});
   };
   const closeUpgradeBanner = () => {
     localStorage.setItem("undiscover_hide_upgrade", "1");
@@ -1493,20 +1584,41 @@ function App() {
 
 function MusicPlayer({ release, isPlaying, setIsPlaying, onClose, notify }) {
   const [progress, setProgress] = useState(0);
+  const [playerDuration, setPlayerDuration] = useState(0);
+  const [waveform, setWaveform] = useState([]);
   const audioRef = useRef(null);
-  const durationParts = String(release?.duration || "06:00").split(":").map((part) => Number.parseInt(part, 10) || 0);
-  const durationSeconds = durationParts.length === 2 ? (durationParts[0] * 60) + durationParts[1] : 360;
-  const audioDuration = audioRef.current?.duration && Number.isFinite(audioRef.current.duration) ? audioRef.current.duration : durationSeconds;
+  const durationSeconds = parseDurationSeconds(release?.duration || "06:00") || 360;
+  const audioDuration = playerDuration || (audioRef.current?.duration && Number.isFinite(audioRef.current.duration) ? audioRef.current.duration : durationSeconds);
   const currentSeconds = Math.min(audioDuration, Math.floor((progress / 100) * audioDuration));
-  const formatTime = (seconds) => `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+  const waveBars = waveform.length ? waveform : fallbackWaveform(`${release?.title || ""}${release?.artist || ""}`);
 
   useEffect(() => {
     setProgress(0);
+    setPlayerDuration(0);
+    setWaveform([]);
     if (audioRef.current) {
       audioRef.current.pause();
       audioRef.current.load();
     }
   }, [release?.id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!release?.audio_url) {
+      setWaveform(fallbackWaveform(`${release?.title || ""}${release?.artist || ""}`));
+      return undefined;
+    }
+    audioUrlToWaveform(release.audio_url)
+      .then((bars) => {
+        if (!cancelled) setWaveform(bars.length ? bars : fallbackWaveform(`${release.title}${release.artist}`));
+      })
+      .catch(() => {
+        if (!cancelled) setWaveform(fallbackWaveform(`${release.title}${release.artist}`));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [release?.id, release?.audio_url]);
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -1535,6 +1647,10 @@ function MusicPlayer({ release, isPlaying, setIsPlaying, onClose, notify }) {
         <audio
           ref={audioRef}
           src={release.audio_url}
+          onLoadedMetadata={(event) => {
+            const audio = event.currentTarget;
+            if (audio.duration && Number.isFinite(audio.duration)) setPlayerDuration(audio.duration);
+          }}
           onTimeUpdate={(event) => {
             const audio = event.currentTarget;
             if (audio.duration && Number.isFinite(audio.duration)) setProgress((audio.currentTime / audio.duration) * 100);
@@ -1550,19 +1666,19 @@ function MusicPlayer({ release, isPlaying, setIsPlaying, onClose, notify }) {
         <div className="music-player-info">
           <span>{isPlaying ? "Now playing" : "Paused"} - {release.kind} - {release.genre}</span>
           <strong>{release.title}</strong>
-          <small>{release.artist} - {shortNumber(release.plays)} plays - {release.duration}</small>
+          <small>{release.artist} - {shortNumber(release.plays)} plays - {formatDuration(audioDuration)}</small>
         </div>
         <div className="music-player-center">
           <div className="music-wave" onClick={(event) => {
             const rect = event.currentTarget.getBoundingClientRect();
             seek(Math.max(0, Math.min(100, ((event.clientX - rect.left) / rect.width) * 100)));
           }}>
-            {Array.from({ length: 38 }).map((_, index) => {
-              const active = (index / 37) * 100 <= progress;
-              return <i key={index} className={active ? "active" : ""} style={{ height: `${20 + ((index * 13) % 36)}px` }} />;
+            {waveBars.map((height, index) => {
+              const active = (index / Math.max(1, waveBars.length - 1)) * 100 <= progress;
+              return <i key={index} className={active ? "active" : ""} style={{ height: `${height}px` }} />;
             })}
           </div>
-          <div className="music-time"><span>{formatTime(currentSeconds)}</span><span>{formatTime(Math.floor(audioDuration))}</span></div>
+          <div className="music-time"><span>{formatDuration(currentSeconds)}</span><span>{formatDuration(audioDuration)}</span></div>
         </div>
         <div className="music-player-actions">
           <LikeButton key={`like-${release.id}`} release={release} notify={notify} />
@@ -2190,7 +2306,7 @@ function renderRoute(route, notify, playRelease) {
   const [path, query] = route.split("?");
   if (path === "/") return <Home notify={notify} playRelease={playRelease} />;
   if (path === "/explore") return <Explore notify={notify} query={query} playRelease={playRelease} />;
-  if (path === "/charts") return <Charts notify={notify} playRelease={playRelease} />;
+  if (path === "/charts") return <Charts notify={notify} playRelease={playRelease} query={query} />;
   if (path === "/artists") return <Artists notify={notify} />;
   if (path.startsWith("/artist/")) return <ArtistProfile id={path.split("/").pop()} notify={notify} playRelease={playRelease} />;
   if (path.startsWith("/release/")) return <ReleaseDetail id={path.split("/").pop()} notify={notify} playRelease={playRelease} />;
@@ -2666,25 +2782,40 @@ function CareersPage() {
 
 function StaffPanel({ notify }) {
   const { user } = useAuth();
-  const { data, loading, error } = useData("/staff/overview", [user?.id]);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const { data, loading, error } = useData("/staff/overview", [user?.id, refreshKey]);
   if (!user) return <AuthRequired />;
   if (!["staff", "moderator", "admin"].includes(user.role)) return <ErrorPage message="Staff access required." />;
   if (loading) return <main className="page dashboard-page"><SkeletonList /></main>;
   if (error) return <ErrorPage message={error} />;
+  const canAdmin = user.role === "admin";
+  const canModerate = ["moderator", "admin"].includes(user.role);
+  const runStaffAction = async (action, message) => {
+    try {
+      await action();
+      notify(message);
+      setRefreshKey((value) => value + 1);
+    } catch (err) {
+      notify(err.message);
+    }
+  };
   const setRole = async (id, role) => {
-    await request(`/staff/users/${id}/role`, { method: "POST", body: JSON.stringify({ role }) });
-    notify("Role updated.");
-    location.reload();
+    await runStaffAction(() => request(`/staff/users/${id}/role`, { method: "POST", body: JSON.stringify({ role }) }), "Role updated.");
+  };
+  const setPlan = async (id, plan) => {
+    await runStaffAction(() => request(`/staff/users/${id}/plan`, { method: "POST", body: JSON.stringify({ plan }) }), "Plan updated.");
+  };
+  const setVerified = async (id, verified) => {
+    await runStaffAction(() => request(`/staff/users/${id}/verify`, { method: "POST", body: JSON.stringify({ verified }) }), verified ? "Artist verified." : "Verification removed.");
   };
   const moderate = async (id, status) => {
-    await request(`/staff/releases/${id}/moderate`, { method: "POST", body: JSON.stringify({ status }) });
-    notify("Release moderation updated.");
-    location.reload();
+    await runStaffAction(() => request(`/staff/releases/${id}/moderate`, { method: "POST", body: JSON.stringify({ status }) }), "Release moderation updated.");
   };
   const ticketStatus = async (id, status) => {
-    await request(`/staff/tickets/${id}/status`, { method: "POST", body: JSON.stringify({ status }) });
-    notify("Ticket updated.");
-    location.reload();
+    await runStaffAction(() => request(`/staff/tickets/${id}/status`, { method: "POST", body: JSON.stringify({ status }) }), "Ticket updated.");
+  };
+  const reportStatus = async (id, status) => {
+    await runStaffAction(() => request(`/staff/reports/${id}/status`, { method: "POST", body: JSON.stringify({ status }) }), "Copyright report updated.");
   };
   return (
     <main className="page dashboard-page">
@@ -2698,12 +2829,45 @@ function StaffPanel({ notify }) {
         </section>
         <div className="staff-grid">
           <section className="staff-card">
-            <SectionTitle title="Roles" />
-            {data.users.map((item) => <div className="staff-row" key={item.id}><span className="avatar">{item.avatar}</span><strong>{item.name}<small>{item.email}</small></strong><select value={item.role} disabled={user.role !== "admin"} onChange={(e) => setRole(item.id, e.target.value)}><option value="user">User</option><option value="staff">Staff</option><option value="moderator">Moderator</option><option value="admin">Admin</option></select></div>)}
+            <SectionTitle title="Accounts and plans" />
+            {data.users.map((item) => (
+              <div className="staff-row account-row" key={item.id}>
+                <span className="avatar">{item.avatar}</span>
+                <strong>
+                  {item.name}
+                  <small>{item.email}</small>
+                  <small>{item.verified ? "Verified" : "Not verified"} - {subscriptionLabel(item)}</small>
+                </strong>
+                <select value={item.role} disabled={!canAdmin || item.id === user.id} onChange={(event) => setRole(item.id, event.target.value)}>
+                  <option value="user">User</option>
+                  <option value="staff">Staff</option>
+                  <option value="moderator">Moderator</option>
+                  <option value="admin">Admin</option>
+                </select>
+                <select value={subscriptionValue(item)} disabled={!canAdmin} onChange={(event) => setPlan(item.id, event.target.value)}>
+                  <option value="free">Free</option>
+                  <option value="pro">Pro</option>
+                  <option value="label">Label</option>
+                </select>
+                <label className="staff-toggle"><input type="checkbox" checked={!!item.verified} disabled={!canModerate} onChange={(event) => setVerified(item.id, event.target.checked)} /> Verified</label>
+              </div>
+            ))}
           </section>
           <section className="staff-card">
             <SectionTitle title="Moderation" />
-            {data.releases.slice(0, 8).map((release) => <div className="staff-row" key={release.id}><span className={`avatar ${release.color}`}>{release.avatar}</span><strong>{release.title}<small>{release.artist} - {release.scan_status}</small></strong><select value={release.moderation_status} onChange={(e) => moderate(release.id, e.target.value)}><option>published</option><option>review</option><option>blocked</option><option>removed</option></select></div>)}
+            {data.releases.map((release) => (
+              <div className="staff-row moderation-row" key={release.id}>
+                <span className={`avatar ${release.color}`}>{release.avatar}</span>
+                <strong>{release.title}<small>{release.artist} - {release.scan_status}</small><small>{release.visibility} - {release.genre}</small></strong>
+                <select value={release.moderation_status} disabled={!canModerate} onChange={(event) => moderate(release.id, event.target.value)}>
+                  <option>published</option>
+                  <option>review</option>
+                  <option>blocked</option>
+                  <option>removed</option>
+                </select>
+                <a className="button ghost icon-only" href={`#/release/${release.id}`}><ArrowUpRight size={16} /></a>
+              </div>
+            ))}
           </section>
           <section className="staff-card">
             <SectionTitle title="Live support tickets" />
@@ -2711,7 +2875,22 @@ function StaffPanel({ notify }) {
           </section>
           <section className="staff-card">
             <SectionTitle title="Copyright reports" />
-            {data.reports.length ? data.reports.map((report) => <div className="staff-ticket" key={report.id}><b>{report.release_title}</b><p>{report.reason}</p><small>{report.reporter_email} - {report.status}</small></div>) : <p className="muted">No takedown reports.</p>}
+            {data.reports.length ? data.reports.map((report) => (
+              <div className="staff-ticket" key={report.id}>
+                <b>{report.release_title}</b>
+                <p>{report.reason}</p>
+                <small>{report.reporter_email} - {report.status}</small>
+                <div className="staff-ticket-actions">
+                  <select value={report.status} disabled={!canModerate} onChange={(event) => reportStatus(report.id, event.target.value)}>
+                    <option>open</option>
+                    <option>review</option>
+                    <option>resolved</option>
+                    <option>rejected</option>
+                  </select>
+                  {report.evidence_url && <a className="button ghost" href={report.evidence_url} target="_blank" rel="noreferrer">Evidence <ExternalLink size={14} /></a>}
+                </div>
+              </div>
+            )) : <p className="muted">No takedown reports.</p>}
           </section>
         </div>
       </div>
@@ -3120,6 +3299,7 @@ function Home({ notify, playRelease }) {
         {!loading && <ReleaseMarqueeCTA releases={releases} />}
         {!loading && <FocusRail releases={releases} />}
         {!loading && <OfferCarousel releases={releases} />}
+        <DiscoveryHub notify={notify} playRelease={playRelease} />
         <ProductScrollDemo />
         <Testimonials />
         <section className="section">
@@ -3135,6 +3315,90 @@ function Home({ notify, playRelease }) {
   );
 }
 
+function DiscoveryHub({ notify, playRelease }) {
+  const { data, loading } = useData("/discover", []);
+  if (loading || !data) return null;
+  return (
+    <section className="discovery-hub">
+      <div className="discovery-main">
+        {!!data.trending_genres?.length && (
+          <section className="discovery-section">
+            <SectionTitle title="Trending by genre" link="#/charts" action="Top 100" />
+            <div className="genre-trend-grid">
+              {data.trending_genres.map((genre) => (
+                <a className="genre-trend-card" href={`#/charts?genre=${encodeURIComponent(genre.genre)}`} key={genre.genre}>
+                  <span>{genre.genre}</span>
+                  <strong>{shortNumber(genre.plays)} plays</strong>
+                  <small>{shortNumber(genre.downloads)} downloads - {genre.releases} releases</small>
+                </a>
+              ))}
+            </div>
+          </section>
+        )}
+        {!!data.recent?.length && (
+          <section className="discovery-section">
+            <SectionTitle title="Recently listened" />
+            <div className="compact-release-strip">
+              {data.recent.map((release) => <MiniReleaseCard key={release.id} release={release} playRelease={playRelease} />)}
+            </div>
+          </section>
+        )}
+        {!!data.recommended?.length && (
+          <section className="discovery-section">
+            <SectionTitle title="Based on what you like" link="#/explore" action="Explore" />
+            <div className="release-grid discovery-release-grid">
+              {data.recommended.slice(0, 8).map((release) => <ReleaseCard key={release.id} release={release} notify={notify} playRelease={playRelease} />)}
+            </div>
+          </section>
+        )}
+      </div>
+      <aside className="discovery-side">
+        {!!data.boosted?.length && (
+          <section className="boosted-panel">
+            <span className="label">Promoted spots</span>
+            {data.boosted.slice(0, 4).map((campaign) => <CampaignSpot key={campaign.id} campaign={campaign} />)}
+          </section>
+        )}
+        {!!data.suggested_artists?.length && (
+          <section className="suggested-artists-panel">
+            <span className="label">Artists to follow</span>
+            {data.suggested_artists.slice(0, 5).map((artist) => (
+              <a href={artistPath(artist)} key={artist.id}>
+                <span className="avatar">{artist.logo_url || artist.avatar_url ? <img src={artist.logo_url || artist.avatar_url} alt="" /> : artist.avatar}</span>
+                <strong>{artist.name}<small>{shortNumber(artist.followers)} followers</small></strong>
+                <em>{subscriptionLabel(artist)}</em>
+              </a>
+            ))}
+          </section>
+        )}
+      </aside>
+    </section>
+  );
+}
+
+function MiniReleaseCard({ release, playRelease }) {
+  return (
+    <article className="mini-release-card">
+      <button className="play" onClick={() => playRelease(release)} aria-label={`Play ${release.title}`}><Play size={13} fill="currentColor" /></button>
+      <PackArtwork release={release} />
+      <strong>{release.title}</strong>
+      <small>{release.artist} - {release.genre}</small>
+    </article>
+  );
+}
+
+function CampaignSpot({ campaign }) {
+  const click = () => request(`/campaigns/${campaign.id}/click`, { method: "POST" }).catch(() => {});
+  const href = campaign.target_type === "release" && campaign.release_id ? `#/release/${campaign.release_id}` : campaign.url || "#/explore";
+  return (
+    <a className={`campaign-spot spot-${campaign.spot}`} href={href} onClick={click}>
+      <span>{campaign.image_url ? <img src={campaign.image_url} alt="" /> : <Sparkles size={18} />}</span>
+      <strong>{campaign.title}<small>{campaign.target_type === "organizer" ? "Organizer placement" : campaign.release_title || "Promoted release"}</small></strong>
+      <em>{money(campaign.daily_budget_cents)}/day</em>
+    </a>
+  );
+}
+
 function EmptyCatalogState({ title = "No public releases yet", text = "The production catalog is empty until artists upload and publish real releases." }) {
   return (
     <div className="empty">
@@ -3146,51 +3410,25 @@ function EmptyCatalogState({ title = "No public releases yet", text = "The produ
 }
 
 function Testimonials() {
-  const quotes = [
-    {
-      size: "large",
-      logo: "U0 PRO",
-      quote: "Undiscover turned our private dub workflow into a storefront. Uploading, gating and selling edits finally feels direct.",
-      name: "Independent artist",
-      role: "Producer",
-      avatar: "IA"
-    },
-    {
-      size: "wide",
-      quote: "No bloated marketplace energy. Just clean releases, clean stats, and a checkout I can send to promoters.",
-      name: "Label owner",
-      role: "Catalog manager",
-      avatar: "LO"
-    },
-    {
-      quote: "The free download gates are exactly what I needed for mailing-list growth.",
-      name: "Download-gate user",
-      role: "Artist",
-      avatar: "DG"
-    },
-    {
-      quote: "The artist page feels like a real catalog, not a social feed trying to sell me ads.",
-      name: "Milo Varen",
-      role: "Label manager",
-      avatar: "MV"
-    }
-  ];
+  const { data, loading } = useData("/testimonials", []);
+  const quotes = data?.testimonials || [];
+  if (loading || !quotes.length) return null;
 
   return (
     <section className="testimonials-section">
       <div className="testimonials-head">
         <h2>Built for makers, loved by electronic artists.</h2>
-        <p>Undiscover gives producers a sharper way to package tracks, prove demand and sell directly to their audience.</p>
+        <p>Published by Pro artists using Undiscover for real releases, gates and direct storefronts.</p>
       </div>
       <div className="testimonial-grid">
-        {quotes.map((item) => (
-          <article className={`testimonial-card ${item.size || ""}`} key={item.name}>
-            {item.logo && <div className="testimonial-logo">{item.logo}</div>}
+        {quotes.map((item, index) => (
+          <article className={`testimonial-card ${index === 0 ? "large" : index === 1 ? "wide" : ""}`} key={item.user_id}>
+            <div className="testimonial-logo">{item.plan === "label" ? "LABEL" : "PRO"}</div>
             <blockquote>
               <p>{item.quote}</p>
               <footer>
-                <span className="avatar">{item.avatar}</span>
-                <span><cite>{item.name}</cite><small>{item.role}</small></span>
+                <span className="avatar">{item.logo_url || item.avatar_url ? <img src={item.logo_url || item.avatar_url} alt="" /> : item.avatar}</span>
+                <span><cite>{item.name}</cite><small>{item.role || "Artist"}</small></span>
               </footer>
             </blockquote>
           </article>
@@ -3243,13 +3481,47 @@ function Explore({ notify, playRelease }) {
   );
 }
 
-function Charts({ notify, playRelease }) {
-  const { data, loading } = useData("/releases", []);
+function Charts({ notify, playRelease, query }) {
+  const params = new URLSearchParams(query || "");
+  const [type, setType] = useState(params.get("type") || "top100");
+  const [genre, setGenre] = useState(params.get("genre") || "All");
+  const { data, loading } = useData(`/charts?type=${encodeURIComponent(type)}&genre=${encodeURIComponent(genre)}`, [type, genre]);
+  const chartTypes = [
+    ["top100", "Top 100"],
+    ["plays", "Top plays"],
+    ["downloads", "Top downloads"],
+    ["sales", "Top sales"],
+    ["countries", "Top pays"]
+  ];
+  const genres = ["All", "Tech House", "Techno", "Melodic", "Afro House", "Drum & Bass", "Hard Techno", "Riddim", "Dubstep"];
   return (
-    <main className="page">
-      <PageHeader eyebrow="Charts" title="Trending this week" text="Ranked by plays, sales energy and yard noise." />
-      {loading ? <SkeletonList /> : <><OfferCarousel releases={data.releases} title="Chart movers" action="Explore all" /><ReleaseRows releases={data.releases} notify={notify} playRelease={playRelease} ranked /></>}
+    <main className="page charts-page">
+      <PageHeader eyebrow="Charts" title="Top 100, plays, downloads and countries." text="Ranked from real plays, downloads, likes, comments, sales and release freshness." />
+      <div className="chart-toolbar">
+        <div className="chips">{chartTypes.map(([id, label]) => <button key={id} className={type === id ? "chip active" : "chip"} onClick={() => setType(id)}>{label}</button>)}</div>
+        <select value={genre} onChange={(event) => setGenre(event.target.value)}>
+          {genres.map((item) => <option key={item}>{item}</option>)}
+        </select>
+      </div>
+      {loading ? <SkeletonList /> : type === "countries" ? <CountryCharts countries={data.countries || []} /> : <ReleaseRows releases={data.releases || []} notify={notify} playRelease={playRelease} ranked />}
     </main>
+  );
+}
+
+function CountryCharts({ countries }) {
+  if (!countries.length) return <EmptyCatalogState title="No chart data yet" text="Charts will fill when releases start getting plays and downloads." />;
+  return (
+    <section className="country-chart-list">
+      {countries.map((country, index) => (
+        <article key={country.location}>
+          <b>{index + 1}</b>
+          <strong>{country.location}</strong>
+          <span>{shortNumber(country.plays)} plays</span>
+          <span>{shortNumber(country.downloads)} downloads</span>
+          <span>{shortNumber(country.sales)} sales</span>
+        </article>
+      ))}
+    </section>
   );
 }
 
@@ -3301,8 +3573,9 @@ function ArtistProfile({ id, notify, playRelease }) {
             <div>
               <div className="profile-badges">
                 <span className="badge soft">{artist.genre}</span>
-                {artist.verified ? <span className="badge accent">Verified</span> : null}
-                {artist.pro ? <span className="badge dark">U0 Pro</span> : null}
+                <span className={`badge plan-${subscriptionValue(artist)}`}>{subscriptionLabel(artist)}</span>
+                {artist.verified ? <span className="badge accent">Verified artist</span> : null}
+                {staffRoleLabel(artist.role) ? <span className="badge role-badge">{staffRoleLabel(artist.role)}</span> : null}
               </div>
               <h1>{artist.name}</h1>
               <p>{artist.bio || "Direct club music catalog, free gates, dubpacks and release drops."}</p>
@@ -3401,18 +3674,50 @@ function ProfileReleaseList({ releases, notify, playRelease }) {
 function ReleaseDetail({ id, notify, playRelease }) {
   const { data, loading, error } = useData(`/releases/${id}`, [id]);
   const [reportOpen, setReportOpen] = useState(false);
+  const [waveform, setWaveform] = useState([]);
+  const release = data?.release;
+  useEffect(() => {
+    let cancelled = false;
+    if (!release) return undefined;
+    audioUrlToWaveform(release.audio_url, 96)
+      .then((bars) => {
+        if (!cancelled) setWaveform(bars.length ? bars : fallbackWaveform(`${release.title}${release.artist}`, 96));
+      })
+      .catch(() => {
+        if (!cancelled) setWaveform(fallbackWaveform(`${release.title}${release.artist}`, 96));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [release?.id, release?.audio_url]);
   if (loading) return <main className="page"><SkeletonList /></main>;
   if (error) return <ErrorPage message={error} />;
-  const release = data.release;
+  const waveBars = waveform.length ? waveform : fallbackWaveform(`${release.title}${release.artist}`, 96);
   return (
     <main className="page release-detail-page">
       <section className="release-detail-hero">
-        <PackArtwork release={release} large />
+        <div className="release-art-shell">
+          <PackArtwork release={release} large />
+        </div>
         <div className="release-detail-copy">
           <p className="label">{release.kind} - {release.genre} - {release.visibility || "public"}</p>
           <h1>{release.title}</h1>
           <p className="muted">By <a href={artistPath({ id: release.user_id, artist_slug: release.artist_slug })}>{release.artist}</a> - {release.tracks} track(s) - {release.duration}</p>
-          <p>{release.description}</p>
+          <div className="profile-badges release-artist-badges">
+            <span className={`badge plan-${subscriptionValue({ plan: release.artist_plan, pro: release.pro })}`}>{subscriptionLabel({ plan: release.artist_plan, pro: release.pro })}</span>
+            {release.verified ? <span className="badge accent">Verified artist</span> : null}
+            {staffRoleLabel(release.artist_role) ? <span className="badge role-badge">{staffRoleLabel(release.artist_role)}</span> : null}
+          </div>
+          <div className="release-hero-actions">
+            <button className="button accent" type="button" onClick={() => playRelease(release)}><Play size={16} fill="currentColor" /> Play</button>
+            <LikeButton release={release} notify={notify} />
+            {release.free ? <ReleaseDownloadGate release={release} notify={notify} /> : <BuyButton release={release} notify={notify} />}
+            <button className="button ghost" type="button" onClick={() => setReportOpen((value) => !value)}><ShieldAlert size={16} /> Report</button>
+          </div>
+          <div className="release-hero-wave" aria-label="Audio waveform">
+            {waveBars.map((height, index) => <i key={index} style={{ height: `${height}px` }} />)}
+          </div>
+          <div className="music-time release-wave-time"><span>0:00</span><span>{release.duration}</span></div>
           <div className="release-share-line">
             <span>https://undisc0ver.com/release/{release.id}</span>
             <button className="button ghost" type="button" onClick={() => navigator.clipboard?.writeText(`https://undisc0ver.com/release/${release.id}`)}><Copy size={15} /> Copy link</button>
@@ -3420,20 +3725,18 @@ function ReleaseDetail({ id, notify, playRelease }) {
         </div>
       </section>
       <section className="release-detail-body">
-        <div>
-        <div className="button-row">
-          <button className="button accent" type="button" onClick={() => playRelease(release)}><Play size={16} fill="currentColor" /> Play</button>
-          <LikeButton release={release} notify={notify} />
-          {release.free ? <ReleaseDownloadGate release={release} notify={notify} /> : <BuyButton release={release} notify={notify} />}
-          <button className="button ghost" type="button" onClick={() => setReportOpen((value) => !value)}><ShieldAlert size={16} /> Report copyright</button>
-        </div>
-        <div className="stats card-stats">
-          <b>{shortNumber(release.plays)}<span>plays</span></b>
-          <b>{shortNumber(release.downloads)}<span>downloads</span></b>
-          <b>{shortNumber(release.sales || 0)}<span>sales</span></b>
-          <b>{release.likes}<span>likes</span></b>
-        </div>
-        {reportOpen && <TakedownReportForm release={release} notify={notify} />}
+        <div className="release-main-column">
+          <article className="release-about-card">
+            <span className="label">About this drop</span>
+            <p>{release.description || "No description yet."}</p>
+          </article>
+          <div className="stats card-stats release-stat-grid">
+            <b>{shortNumber(release.plays)}<span>plays</span></b>
+            <b>{shortNumber(release.downloads)}<span>downloads</span></b>
+            <b>{shortNumber(release.sales || 0)}<span>sales</span></b>
+            <b>{release.likes}<span>likes</span></b>
+          </div>
+          {reportOpen && <TakedownReportForm release={release} notify={notify} />}
         </div>
         <ReleaseComments release={release} initialComments={data.comments || []} notify={notify} />
       </section>
@@ -3524,7 +3827,7 @@ function UploadPage({ notify }) {
     <main className="page narrow">
       <PageHeader eyebrow="New release" title="Upload a track, EP or dubpack." text="Metadata is saved to the production database and appears after rights checks pass." />
       <form className="form-card" onSubmit={submit}>
-        <FileUploadPanel file={file} setFile={setFile} notify={notify} />
+        <FileUploadPanel file={file} setFile={setFile} notify={notify} onDurationChange={(seconds) => update("duration", formatDuration(seconds))} />
         <ImageUploadPanel file={coverFile} setFile={setCoverFile} title="Cover artwork" text="Upload a square JPG, PNG or WebP cover for this release." defaultWidth={1400} defaultHeight={1400} />
         <label>Track title<input value={form.title} onChange={(e) => update("title", e.target.value)} placeholder="e.g. Your release title" required /></label>
         <div className="form-grid">
@@ -3644,10 +3947,21 @@ function TakedownReportForm({ release, notify }) {
   );
 }
 
-function FileUploadPanel({ file, setFile, notify }) {
+function FileUploadPanel({ file, setFile, notify, onDurationChange }) {
   const fileInputId = useId();
   const [progress, setProgress] = useState(0);
   const readableSize = file ? `${Math.max(file.size / 1024 / 1024, 0.01).toFixed(1)} MB` : "";
+  const chooseFile = async (event) => {
+    const nextFile = event.target.files?.[0] || null;
+    setFile(nextFile);
+    if (!nextFile) return;
+    try {
+      const seconds = await getAudioFileDuration(nextFile);
+      if (seconds) onDurationChange?.(seconds);
+    } catch {
+      notify("Audio duration could not be detected.");
+    }
+  };
   useEffect(() => {
     if (!file) {
       setProgress(0);
@@ -3664,7 +3978,7 @@ function FileUploadPanel({ file, setFile, notify }) {
       <label className="file-dropzone" htmlFor={fileInputId}>
         <Upload size={26} />
         <span>Drag and drop or choose file to upload</span>
-        <input id={fileInputId} type="file" accept=".wav,.mp3,.aiff,.aif,audio/*" onChange={(event) => setFile(event.target.files?.[0] || null)} />
+        <input id={fileInputId} type="file" accept=".wav,.mp3,.aiff,.aif,audio/*" onChange={chooseFile} />
       </label>
       <p>Recommended max. size: 500 MB. Accepted file types: WAV, MP3, AIFF.</p>
       {file ? (
@@ -3968,11 +4282,11 @@ function SettingsPage({ notify }) {
   const auth = useAuth();
   const { user } = auth;
   const plans = [
-    { name: "Creator", price: "0 EUR", features: ["Public artist profile", "3 active releases", "Community support"] },
-    { name: "Pro", price: "7.99 EUR", recommended: true, features: ["Unlimited releases", "Advanced analytics", "Fast payout queue"] },
-    { name: "Label", price: "29 EUR", features: ["Multiple artists", "Client portal", "Priority support"] }
+    { name: "Free", value: "free", price: "0 EUR", features: ["Public artist profile", "3 active releases", "Community support"] },
+    { name: "Pro", value: "pro", price: "7.99 EUR", locked: true, features: ["Unlimited releases", "Advanced analytics", "Fast payout queue"] },
+    { name: "Label", value: "label", price: "29 EUR", locked: true, features: ["Multiple artists", "Client portal", "Priority support"] }
   ];
-  const [selected, setSelected] = useState("Pro");
+  const [selected] = useState(subscriptionValue(user));
   const socialLinks = (() => { try { return JSON.parse(user?.social_links || "{}"); } catch { return {}; } })();
   const [profile, setProfile] = useState(() => ({
     name: user?.name || "",
@@ -4050,8 +4364,8 @@ function SettingsPage({ notify }) {
           <div><h2>Plan type</h2><p>Select the plan that matches your release cycle.</p></div>
           <div className="plan-options">
             {plans.map((plan) => (
-              <button type="button" className={selected === plan.name ? "plan-option selected" : "plan-option"} key={plan.name} onClick={() => setSelected(plan.name)}>
-                <span><strong>{plan.name}</strong>{plan.recommended && <em>recommended</em>}</span>
+              <button type="button" className={`${selected === plan.value ? "plan-option selected" : "plan-option"} ${plan.locked ? "locked" : ""}`} key={plan.name} disabled>
+                <span><strong>{plan.name}</strong>{selected === plan.value && <em>current</em>}{plan.locked && <em>admin only</em>}</span>
                 <ul>{plan.features.map((feature) => <li key={feature}><Check size={15} /> {feature}</li>)}</ul>
                 <b>{plan.price}<small>/mo</small></b>
               </button>
@@ -4243,6 +4557,132 @@ function ProfileLinkEditor({ user, notify }) {
   );
 }
 
+function TestimonialEditor({ user, notify }) {
+  const isProPlan = ["pro", "label"].includes(subscriptionValue(user));
+  const { data, loading } = useData(isProPlan ? "/me/testimonial" : "/health", [user.id, user.plan, user.pro]);
+  const [form, setForm] = useState({ quote: "", role: user.genre || "Artist", visible: true });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (data?.testimonial) {
+      setForm({
+        quote: data.testimonial.quote || "",
+        role: data.testimonial.role || user.genre || "Artist",
+        visible: data.testimonial.visible !== 0
+      });
+    }
+  }, [data?.testimonial?.updated_at]);
+
+  const update = (key, value) => setForm((current) => ({ ...current, [key]: value }));
+  const submit = async (event) => {
+    event.preventDefault();
+    setError("");
+    setSaving(true);
+    try {
+      await request("/me/testimonial", { method: "PUT", body: JSON.stringify(form) });
+      notify("Review saved.");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <section className="testimonial-editor-card">
+      <div className="link-shortener-head">
+        <MessageCircle size={22} />
+        <div>
+          <h2>Pro public review</h2>
+          <p>{isProPlan ? "Leave a clean public review shown on the homepage." : "Upgrade to Pro to publish a homepage review."}</p>
+        </div>
+      </div>
+      {!isProPlan ? (
+        <a className="button accent" href="#/pricing"><CreditCard size={16} /> Upgrade to Pro</a>
+      ) : (
+        <form className="testimonial-editor-form" onSubmit={submit}>
+          <label>Review<textarea value={form.quote} onChange={(event) => update("quote", event.target.value)} maxLength={360} placeholder="Tell artists what Undiscover helps you do..." disabled={loading || saving} /></label>
+          <label>Display role<input value={form.role} onChange={(event) => update("role", event.target.value)} maxLength={80} placeholder="Producer, Label manager..." disabled={loading || saving} /></label>
+          <label className="testimonial-visible-toggle"><input type="checkbox" checked={form.visible} onChange={(event) => update("visible", event.target.checked)} disabled={loading || saving} /> Show publicly</label>
+          {error && <p className="error">{error}</p>}
+          <button className="button accent" type="submit" disabled={loading || saving}>{saving ? <Loader2 className="spin" size={16} /> : <Check size={16} />} Save review</button>
+        </form>
+      )}
+    </section>
+  );
+}
+
+function CampaignManager({ releases, notify }) {
+  const { data, loading } = useData("/me/campaigns", []);
+  const [form, setForm] = useState({
+    target_type: "release",
+    release_id: releases[0]?.id || "",
+    title: releases[0]?.title || "",
+    url: "",
+    image_url: "",
+    spot: "discovery",
+    daily_budget_cents: 100,
+    days: 3
+  });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const update = (key, value) => setForm((current) => ({ ...current, [key]: value }));
+  const submit = async (event) => {
+    event.preventDefault();
+    setError("");
+    setBusy(true);
+    try {
+      await request("/me/campaigns", { method: "POST", body: JSON.stringify(form) });
+      notify("Campaign launched.");
+      location.hash = "#/dashboard";
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const campaigns = data?.campaigns || [];
+  return (
+    <section className="campaign-manager-card">
+      <div className="link-shortener-head">
+        <Sparkles size={22} />
+        <div>
+          <h2>Promote music or organizer</h2>
+          <p>Buy clean discovery placements by day: 1, 3 or 5 EUR/day depending on the spot.</p>
+        </div>
+      </div>
+      <form className="campaign-form" onSubmit={submit}>
+        <label>Target<select value={form.target_type} onChange={(event) => update("target_type", event.target.value)}><option value="release">Release</option><option value="organizer">Organizer</option></select></label>
+        {form.target_type === "release" ? (
+          <label>Release<select value={form.release_id} onChange={(event) => {
+            const next = releases.find((release) => release.id === event.target.value);
+            update("release_id", event.target.value);
+            update("title", next?.title || form.title);
+          }}>{releases.map((release) => <option key={release.id} value={release.id}>{release.title}</option>)}</select></label>
+        ) : (
+          <label>Organizer link<input value={form.url} onChange={(event) => update("url", event.target.value)} placeholder="https://..." /></label>
+        )}
+        <label>Campaign title<input value={form.title} onChange={(event) => update("title", event.target.value)} placeholder="New club night, EP drop..." /></label>
+        <label>Image URL<input value={form.image_url} onChange={(event) => update("image_url", event.target.value)} placeholder="https://..." /></label>
+        <label>Spot<select value={form.spot} onChange={(event) => update("spot", event.target.value)}><option value="discovery">Discovery feed</option><option value="homepage">Homepage hero rail</option><option value="charts">Charts boost</option><option value="sidebar">Sidebar native ad</option></select></label>
+        <label>Budget/day<select value={form.daily_budget_cents} onChange={(event) => update("daily_budget_cents", Number(event.target.value))}><option value={100}>1 EUR/day</option><option value={300}>3 EUR/day</option><option value={500}>5 EUR/day</option></select></label>
+        <label>Days<input type="number" min="1" max="30" value={form.days} onChange={(event) => update("days", event.target.value)} /></label>
+        {error && <p className="error">{error}</p>}
+        <button className="button accent" type="submit" disabled={busy || (form.target_type === "release" && !releases.length)}>{busy ? <Loader2 className="spin" size={16} /> : <Sparkles size={16} />} Launch campaign</button>
+      </form>
+      <div className="campaign-list">
+        {loading ? <p className="muted">Loading campaigns...</p> : campaigns.slice(0, 4).map((campaign) => (
+          <article key={campaign.id}>
+            <strong>{campaign.title}<small>{campaign.spot} - {money(campaign.daily_budget_cents)}/day - {campaign.days} days</small></strong>
+            <span>{campaign.status}</span>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function DashboardHero({ user, stats }) {
   return (
     <section className="dashboard-hero">
@@ -4295,7 +4735,9 @@ function Dashboard({ section, notify, playRelease }) {
               </section>
               <div className="dashboard-overview-grid">
                 <ProfileLinkEditor user={user} notify={notify} />
+                <TestimonialEditor user={user} notify={notify} />
                 <LinkShortenerWidget notify={notify} />
+                <CampaignManager releases={releases} notify={notify} />
                 <RevenueBars releases={releases} />
               </div>
             </>
@@ -4679,7 +5121,12 @@ function ArtistCard({ artist, notify }) {
     <article className="card artist-card">
       <span className="avatar">{artist.avatar}</span>
       <div>
-        <h2><a href={artistPath(artist)}>{artist.name}</a> {artist.pro ? <span className="badge dark">U0 Pro</span> : null}</h2>
+        <h2>
+          <a href={artistPath(artist)}>{artist.name}</a>
+          <span className={`badge plan-${subscriptionValue(artist)}`}>{subscriptionLabel(artist)}</span>
+          {artist.verified ? <span className="badge accent">Verified</span> : null}
+          {staffRoleLabel(artist.role) ? <span className="badge role-badge">{staffRoleLabel(artist.role)}</span> : null}
+        </h2>
         <p>{artist.genre} - {shortNumber(artist.followers)} followers</p>
       </div>
       <FollowButton artistId={artist.id} notify={notify} />

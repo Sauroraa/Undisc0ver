@@ -226,9 +226,17 @@ function staffAuth(req, res, next) {
   });
 }
 
+function requireStaffRole(req, res, roles = []) {
+  if (!roles.includes(req.user.role)) {
+    res.status(403).json({ error: "Permission insuffisante." });
+    return false;
+  }
+  return true;
+}
+
 function releaseSelect(where = "", order = "r.plays DESC") {
   return `
-    SELECT r.*, u.name artist, u.avatar, u.avatar_url, u.artist_slug, u.verified, u.pro,
+    SELECT r.*, u.name artist, u.avatar, u.avatar_url, u.artist_slug, u.role artist_role, u.plan artist_plan, u.verified, u.pro,
       (SELECT COUNT(*) FROM likes l WHERE l.release_id = r.id) likes,
       (SELECT COUNT(*) FROM release_comments rc WHERE rc.release_id = r.id) comments,
       (SELECT COUNT(*) FROM follows f WHERE f.artist_id = u.id) followers
@@ -247,6 +255,21 @@ function optionalUserId(req) {
 
 function publicReleaseWhere(prefix = "r") {
   return `${prefix}.moderation_status = 'published' AND ${prefix}.visibility = 'public'`;
+}
+
+function activeCampaignWhere(prefix = "pc") {
+  return `${prefix}.status = 'active' AND datetime(${prefix}.ends_at) >= datetime('now')`;
+}
+
+function campaignSelect(where = "", order = "pc.created_at DESC") {
+  return `
+    SELECT pc.*, r.title release_title, r.genre release_genre, r.cover_url release_cover_url, u.name owner_name
+    FROM promotion_campaigns pc
+    LEFT JOIN releases r ON r.id = pc.release_id
+    JOIN users u ON u.id = pc.user_id
+    ${where}
+    ORDER BY ${order}
+  `;
 }
 
 function normalizeArtistSlug(value = "") {
@@ -276,8 +299,8 @@ app.post("/api/auth/register", (req, res) => {
   const initials = name.split(" ").map((part) => part[0]).join("").slice(0, 2).toUpperCase();
   const userId = id("usr");
   try {
-    db.prepare("INSERT INTO users (id, name, email, password_hash, avatar, genre, bio) VALUES (?, ?, ?, ?, ?, ?, ?)")
-      .run(userId, name, email.toLowerCase(), hashPassword(password), initials || "U0", genre, "Nouvel artiste Undiscover.");
+    db.prepare("INSERT INTO users (id, name, email, password_hash, avatar, genre, bio, plan, pro) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+      .run(userId, name, email.toLowerCase(), hashPassword(password), initials || "U0", genre, "Nouvel artiste Undiscover.", "free", 0);
     const token = id("tok");
     db.prepare("INSERT INTO sessions (token, user_id) VALUES (?, ?)").run(token, userId);
     res.json({ token, user: publicUser(db.prepare("SELECT * FROM users WHERE id = ?").get(userId)) });
@@ -328,8 +351,8 @@ app.get("/api/auth/google/callback", async (req, res) => {
         .run(String(profile.sub), String(profile.picture || ""), user.id);
     } else {
       const userId = id("usr");
-      db.prepare("INSERT INTO users (id, name, email, password_hash, avatar, avatar_url, google_id, auth_provider, genre, bio) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-        .run(userId, name, email, hashPassword(id("google")), avatar, String(profile.picture || ""), String(profile.sub), "google", "Electronic", "Nouvel artiste Undiscover.");
+      db.prepare("INSERT INTO users (id, name, email, password_hash, avatar, avatar_url, google_id, auth_provider, genre, bio, plan, pro) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+        .run(userId, name, email, hashPassword(id("google")), avatar, String(profile.picture || ""), String(profile.sub), "google", "Electronic", "Nouvel artiste Undiscover.", "free", 0);
       user = db.prepare("SELECT * FROM users WHERE id = ?").get(userId);
     }
 
@@ -500,6 +523,113 @@ app.post("/api/releases/:id/comments", auth, (req, res) => {
   res.json({ ok: true });
 });
 
+app.post("/api/releases/:id/listen", (req, res) => {
+  const userId = optionalUserId(req);
+  const release = db.prepare(`SELECT r.id FROM releases r WHERE r.id = ? AND ${publicReleaseWhere("r")}`).get(req.params.id);
+  if (!release) return res.status(404).json({ error: "Release introuvable." });
+  db.prepare("INSERT INTO release_listens (id, user_id, release_id) VALUES (?, ?, ?)").run(id("lst"), userId, req.params.id);
+  db.prepare("UPDATE releases SET plays = plays + 1 WHERE id = ?").run(req.params.id);
+  res.json({ ok: true });
+});
+
+app.get("/api/discover", (req, res) => {
+  const userId = optionalUserId(req);
+  const recent = userId
+    ? db.prepare(releaseSelect(`
+        JOIN release_listens rl ON rl.release_id = r.id
+        WHERE rl.user_id = ? AND ${publicReleaseWhere("r")}
+        GROUP BY r.id
+      `, "MAX(rl.created_at) DESC")).all(userId).slice(0, 12)
+    : [];
+  const affinity = userId
+    ? db.prepare(`
+        SELECT r.genre, r.user_id, COUNT(*) weight
+        FROM release_listens rl
+        JOIN releases r ON r.id = rl.release_id
+        WHERE rl.user_id = ?
+        GROUP BY r.genre, r.user_id
+        ORDER BY weight DESC
+        LIMIT 8
+      `).all(userId)
+    : [];
+  const genres = affinity.map((row) => row.genre);
+  const artistIds = affinity.map((row) => row.user_id);
+  const allReleases = db.prepare(releaseSelect(`WHERE ${publicReleaseWhere("r")}`, "r.created_at DESC")).all();
+  const recentlyHeardIds = new Set(recent.map((item) => item.id));
+  const recommended = allReleases
+    .filter((release) => !recentlyHeardIds.has(release.id))
+    .map((release) => ({
+      ...release,
+      recommendation_score:
+        Number(release.plays || 0) * 0.55 +
+        Number(release.downloads || 0) * 1.4 +
+        Number(release.likes || 0) * 4 +
+        (genres.includes(release.genre) ? 90 : 0) +
+        (artistIds.includes(release.user_id) ? 70 : 0) +
+        (Date.now() - new Date(release.created_at).getTime() < 1000 * 60 * 60 * 24 * 14 ? 35 : 0)
+    }))
+    .sort((a, b) => b.recommendation_score - a.recommendation_score)
+    .slice(0, 16);
+  const trendingGenres = db.prepare(`
+    SELECT r.genre, COUNT(*) releases, COALESCE(SUM(r.plays), 0) plays, COALESCE(SUM(r.downloads), 0) downloads
+    FROM releases r
+    WHERE ${publicReleaseWhere("r")}
+    GROUP BY r.genre
+    ORDER BY (COALESCE(SUM(r.plays), 0) + COALESCE(SUM(r.downloads), 0) * 2 + COUNT(*) * 15) DESC
+    LIMIT 8
+  `).all();
+  const boosted = db.prepare(campaignSelect(`WHERE ${activeCampaignWhere("pc")}`, "pc.daily_budget_cents DESC, pc.created_at DESC")).all().slice(0, 8);
+  const suggestedArtists = db.prepare(`
+    SELECT u.id, u.name, u.avatar, u.avatar_url, u.logo_url, u.artist_slug, u.genre, u.verified, u.pro, u.plan, u.role,
+      COUNT(DISTINCT r.id) releases, COALESCE(SUM(r.plays), 0) plays, COUNT(DISTINCT f.follower_id) followers
+    FROM users u
+    LEFT JOIN releases r ON r.user_id = u.id AND ${publicReleaseWhere("r")}
+    LEFT JOIN follows f ON f.artist_id = u.id
+    WHERE u.workspace_visibility = 'public'
+    GROUP BY u.id
+    ORDER BY (COALESCE(SUM(r.plays), 0) + COUNT(DISTINCT f.follower_id) * 12 + u.verified * 80 + u.pro * 60) DESC
+    LIMIT 8
+  `).all();
+  res.json({
+    recent,
+    recommended,
+    trending_genres: trendingGenres,
+    boosted,
+    suggested_artists: suggestedArtists,
+    new_releases: allReleases.slice(0, 12)
+  });
+});
+
+app.get("/api/charts", (req, res) => {
+  const type = String(req.query.type || "top100");
+  const genre = String(req.query.genre || "All");
+  const genreWhere = genre && genre !== "All" ? " AND r.genre = ?" : "";
+  const params = genreWhere ? [genre] : [];
+  if (type === "countries") {
+    const countries = db.prepare(`
+      SELECT COALESCE(NULLIF(u.location, ''), 'Unknown') location, COUNT(DISTINCT r.id) releases,
+        COALESCE(SUM(r.plays), 0) plays, COALESCE(SUM(r.downloads), 0) downloads, COALESCE(SUM(r.sales), 0) sales
+      FROM releases r
+      JOIN users u ON u.id = r.user_id
+      WHERE ${publicReleaseWhere("r")} ${genreWhere}
+      GROUP BY location
+      ORDER BY plays DESC, downloads DESC
+      LIMIT 50
+    `).all(...params);
+    return res.json({ countries });
+  }
+  const orderMap = {
+    top100: "(r.plays + r.downloads * 3 + r.sales * 6 + (SELECT COUNT(*) FROM likes l WHERE l.release_id = r.id) * 4 + (SELECT COUNT(*) FROM release_comments rc WHERE rc.release_id = r.id) * 2) DESC",
+    plays: "r.plays DESC",
+    downloads: "r.downloads DESC",
+    sales: "r.sales DESC",
+    newest: "r.created_at DESC"
+  };
+  const order = orderMap[type] || orderMap.top100;
+  const releases = db.prepare(releaseSelect(`WHERE ${publicReleaseWhere("r")} ${genreWhere}`, order)).all(...params).slice(0, 100);
+  res.json({ releases });
+});
+
 function requiredGateActions(release) {
   if (!release.download_enabled) return [];
   try {
@@ -574,7 +704,7 @@ app.post("/api/releases/:id/buy", auth, (req, res) => {
 app.get("/api/artists", (req, res) => {
   const q = `%${req.query.q || ""}%`;
   const rows = db.prepare(`
-    SELECT u.id, u.name, u.avatar, u.avatar_url, u.logo_url, u.banner_url, u.artist_slug, u.social_links, u.genre, u.location, u.bio, u.verified, u.pro,
+    SELECT u.id, u.name, u.avatar, u.avatar_url, u.logo_url, u.banner_url, u.artist_slug, u.social_links, u.genre, u.location, u.bio, u.verified, u.pro, u.plan, u.role,
       COUNT(DISTINCT r.id) releases,
       COALESCE(SUM(r.plays), 0) plays,
       COUNT(DISTINCT f.follower_id) followers
@@ -590,7 +720,7 @@ app.get("/api/artists", (req, res) => {
 
 app.get("/api/artists/:id", (req, res) => {
   const artist = db.prepare(`
-    SELECT u.id, u.name, u.avatar, u.avatar_url, u.logo_url, u.banner_url, u.artist_slug, u.social_links, u.genre, u.location, u.bio, u.verified, u.pro,
+    SELECT u.id, u.name, u.avatar, u.avatar_url, u.logo_url, u.banner_url, u.artist_slug, u.social_links, u.genre, u.location, u.bio, u.verified, u.pro, u.plan, u.role,
       COUNT(DISTINCT r.id) releases_count,
       COALESCE(SUM(r.plays), 0) plays,
       COUNT(DISTINCT f.follower_id) followers
@@ -607,6 +737,8 @@ app.get("/api/artists/:id", (req, res) => {
 
 app.patch("/api/me/settings", auth, (req, res) => {
   const artistSlug = normalizeArtistSlug(req.body.artist_slug || "");
+  const currentPlan = ["free", "pro", "label"].includes(String(req.user.plan || "").toLowerCase()) ? String(req.user.plan).toLowerCase() : req.user.pro ? "pro" : "free";
+  const plan = currentPlan;
   if (artistSlug && artistSlug.length < 3) return res.status(400).json({ error: "Le lien perso doit contenir au moins 3 caracteres." });
   if (artistSlug && /^usr_/i.test(artistSlug)) return res.status(400).json({ error: "Ce lien perso est reserve." });
   if (artistSlug) {
@@ -623,6 +755,7 @@ app.patch("/api/me/settings", auth, (req, res) => {
     logo_url: String(req.body.logo_url || "").trim(),
     banner_url: String(req.body.banner_url || "").trim(),
     artist_slug: artistSlug,
+    plan,
     workspace_visibility: ["public", "private"].includes(String(req.body.workspace_visibility).toLowerCase()) ? String(req.body.workspace_visibility).toLowerCase() : "public",
     social_links: JSON.stringify({
       instagram: String(req.body.instagram || "").trim(),
@@ -633,8 +766,8 @@ app.patch("/api/me/settings", auth, (req, res) => {
   };
   if (!fields.name || !fields.email) return res.status(400).json({ error: "Nom et email requis." });
   try {
-    db.prepare(`UPDATE users SET name = ?, email = ?, location = ?, bio = ?, genre = ?, avatar_url = ?, logo_url = ?, banner_url = ?, artist_slug = ?, workspace_visibility = ?, social_links = ? WHERE id = ?`)
-      .run(fields.name, fields.email, fields.location, fields.bio, fields.genre, fields.avatar_url, fields.logo_url, fields.banner_url, fields.artist_slug, fields.workspace_visibility, fields.social_links, req.user.id);
+    db.prepare(`UPDATE users SET name = ?, email = ?, location = ?, bio = ?, genre = ?, avatar_url = ?, logo_url = ?, banner_url = ?, artist_slug = ?, plan = ?, pro = ?, workspace_visibility = ?, social_links = ? WHERE id = ?`)
+      .run(fields.name, fields.email, fields.location, fields.bio, fields.genre, fields.avatar_url, fields.logo_url, fields.banner_url, fields.artist_slug, fields.plan, fields.plan !== "free" ? 1 : 0, fields.workspace_visibility, fields.social_links, req.user.id);
     res.json({ user: publicUser(db.prepare("SELECT * FROM users WHERE id = ?").get(req.user.id)) });
   } catch {
     res.status(409).json({ error: "Cet email existe deja." });
@@ -659,6 +792,38 @@ app.get("/api/dashboard", auth, (req, res) => {
   const comments = db.prepare("SELECT COUNT(*) total FROM release_comments rc JOIN releases r ON r.id = rc.release_id WHERE r.user_id = ?").get(req.user.id).total;
   const releases = db.prepare(releaseSelect("WHERE r.user_id = ? AND r.moderation_status != 'removed'", "r.created_at DESC")).all(req.user.id);
   res.json({ stats: { ...stats, followers, comments }, releases });
+});
+
+app.get("/api/testimonials", (_req, res) => {
+  const testimonials = db.prepare(`
+    SELECT t.quote, t.role, t.updated_at, u.id user_id, u.name, u.avatar, u.avatar_url, u.logo_url, u.artist_slug, u.plan, u.pro
+    FROM testimonials t
+    JOIN users u ON u.id = t.user_id
+    WHERE t.visible = 1 AND u.workspace_visibility = 'public' AND u.plan IN ('pro', 'label')
+    ORDER BY t.updated_at DESC
+    LIMIT 8
+  `).all();
+  res.json({ testimonials });
+});
+
+app.get("/api/me/testimonial", auth, (req, res) => {
+  const testimonial = db.prepare("SELECT quote, role, visible, updated_at FROM testimonials WHERE user_id = ?").get(req.user.id) || null;
+  res.json({ testimonial });
+});
+
+app.put("/api/me/testimonial", auth, (req, res) => {
+  const plan = String(req.user.plan || (req.user.pro ? "pro" : "free")).toLowerCase();
+  if (!["pro", "label"].includes(plan)) return res.status(403).json({ error: "Avis reserves aux comptes Pro et Label." });
+  const quote = String(req.body.quote || "").trim().slice(0, 360);
+  const role = String(req.body.role || req.user.genre || "Artist").trim().slice(0, 80);
+  const visible = req.body.visible === false ? 0 : 1;
+  if (quote.length < 20) return res.status(400).json({ error: "Ton avis doit contenir au moins 20 caracteres." });
+  db.prepare(`
+    INSERT INTO testimonials (user_id, quote, role, visible, updated_at)
+    VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(user_id) DO UPDATE SET quote = excluded.quote, role = excluded.role, visible = excluded.visible, updated_at = CURRENT_TIMESTAMP
+  `).run(req.user.id, quote, role, visible);
+  res.json({ testimonial: db.prepare("SELECT quote, role, visible, updated_at FROM testimonials WHERE user_id = ?").get(req.user.id) });
 });
 
 app.post("/api/support/tickets", (req, res) => {
@@ -692,8 +857,46 @@ app.get("/r/:code", (req, res) => {
   res.redirect(link.target_url);
 });
 
+app.get("/api/me/campaigns", auth, (req, res) => {
+  const campaigns = db.prepare(campaignSelect("WHERE pc.user_id = ?", "pc.created_at DESC")).all(req.user.id);
+  res.json({ campaigns });
+});
+
+app.post("/api/me/campaigns", auth, (req, res) => {
+  const targetType = String(req.body.target_type || "release").toLowerCase();
+  const spot = String(req.body.spot || "discovery").toLowerCase();
+  const dailyBudget = Number(req.body.daily_budget_cents || 100);
+  const days = Math.max(1, Math.min(30, Number(req.body.days || 1)));
+  if (!["release", "organizer"].includes(targetType)) return res.status(400).json({ error: "Type de campagne invalide." });
+  if (!["discovery", "homepage", "charts", "sidebar"].includes(spot)) return res.status(400).json({ error: "Spot publicitaire invalide." });
+  if (![100, 300, 500].includes(dailyBudget)) return res.status(400).json({ error: "Budget invalide. Choisis 1, 3 ou 5 EUR/jour." });
+  const releaseId = targetType === "release" ? String(req.body.release_id || "").trim() : "";
+  if (targetType === "release") {
+    const release = db.prepare("SELECT id FROM releases WHERE id = ? AND user_id = ? AND moderation_status != 'removed'").get(releaseId, req.user.id);
+    if (!release) return res.status(400).json({ error: "Release invalide pour cette campagne." });
+  }
+  const title = String(req.body.title || "").trim().slice(0, 90);
+  const url = String(req.body.url || "").trim().slice(0, 240);
+  const imageUrl = String(req.body.image_url || "").trim().slice(0, 240);
+  if (!title) return res.status(400).json({ error: "Titre de campagne requis." });
+  if (targetType === "organizer" && !url) return res.status(400).json({ error: "Lien organisateur requis." });
+  const campaignId = id("cmp");
+  db.prepare(`
+    INSERT INTO promotion_campaigns (id, user_id, target_type, release_id, title, url, image_url, spot, daily_budget_cents, days, ends_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', ?))
+  `).run(campaignId, req.user.id, targetType, releaseId || null, title, url, imageUrl, spot, dailyBudget, days, `+${days} days`);
+  res.json({ campaign: db.prepare(campaignSelect("WHERE pc.id = ?")).get(campaignId) });
+});
+
+app.post("/api/campaigns/:id/click", (req, res) => {
+  const campaign = db.prepare(`SELECT * FROM promotion_campaigns pc WHERE pc.id = ? AND ${activeCampaignWhere("pc")}`).get(req.params.id);
+  if (!campaign) return res.status(404).json({ error: "Campagne introuvable." });
+  db.prepare("UPDATE promotion_campaigns SET clicks = clicks + 1 WHERE id = ?").run(req.params.id);
+  res.json({ ok: true });
+});
+
 app.get("/api/staff/overview", staffAuth, (_req, res) => {
-  const users = db.prepare("SELECT id, name, email, avatar, avatar_url, role, verified, pro, auth_provider, created_at FROM users ORDER BY created_at DESC").all();
+  const users = db.prepare("SELECT id, name, email, avatar, avatar_url, role, verified, pro, plan, auth_provider, created_at FROM users ORDER BY created_at DESC").all();
   const releases = db.prepare(releaseSelect("WHERE r.moderation_status != 'removed'", "r.created_at DESC")).all();
   const tickets = db.prepare("SELECT * FROM support_tickets ORDER BY created_at DESC").all();
   const reports = db.prepare("SELECT tr.*, r.title release_title FROM takedown_reports tr JOIN releases r ON r.id = tr.release_id ORDER BY tr.created_at DESC").all();
@@ -701,17 +904,35 @@ app.get("/api/staff/overview", staffAuth, (_req, res) => {
 });
 
 app.post("/api/staff/users/:id/role", staffAuth, (req, res) => {
-  if (req.user.role !== "admin") return res.status(403).json({ error: "Role admin requis." });
+  if (!requireStaffRole(req, res, ["admin"])) return;
   const role = String(req.body.role || "user").toLowerCase();
   if (!["user", "staff", "moderator", "admin"].includes(role)) return res.status(400).json({ error: "Role invalide." });
   db.prepare("UPDATE users SET role = ? WHERE id = ?").run(role, req.params.id);
   res.json({ ok: true, role });
 });
 
+app.post("/api/staff/users/:id/plan", staffAuth, (req, res) => {
+  if (!requireStaffRole(req, res, ["admin"])) return;
+  const plan = String(req.body.plan || "free").toLowerCase();
+  if (!["free", "pro", "label"].includes(plan)) return res.status(400).json({ error: "Plan invalide." });
+  db.prepare("UPDATE users SET plan = ?, pro = ? WHERE id = ?").run(plan, plan === "free" ? 0 : 1, req.params.id);
+  res.json({ ok: true, plan });
+});
+
+app.post("/api/staff/users/:id/verify", staffAuth, (req, res) => {
+  if (!requireStaffRole(req, res, ["moderator", "admin"])) return;
+  const verified = req.body.verified ? 1 : 0;
+  db.prepare("UPDATE users SET verified = ? WHERE id = ?").run(verified, req.params.id);
+  res.json({ ok: true, verified: !!verified });
+});
+
 app.post("/api/staff/releases/:id/moderate", staffAuth, (req, res) => {
+  if (!requireStaffRole(req, res, ["moderator", "admin"])) return;
   const status = String(req.body.status || "published").toLowerCase();
   if (!["published", "review", "blocked", "removed"].includes(status)) return res.status(400).json({ error: "Statut invalide." });
-  db.prepare("UPDATE releases SET moderation_status = ? WHERE id = ?").run(status, req.params.id);
+  const scanStatus = status === "published" ? "clear" : status === "removed" ? "blocked" : status;
+  const note = `Staff moderation set release to ${status} by ${req.user.email}.`;
+  db.prepare("UPDATE releases SET moderation_status = ?, scan_status = ?, scan_notes = ? WHERE id = ?").run(status, scanStatus, note, req.params.id);
   res.json({ ok: true, status });
 });
 
@@ -719,6 +940,24 @@ app.post("/api/staff/tickets/:id/status", staffAuth, (req, res) => {
   const status = String(req.body.status || "open").toLowerCase();
   if (!["open", "pending", "closed"].includes(status)) return res.status(400).json({ error: "Statut invalide." });
   db.prepare("UPDATE support_tickets SET status = ? WHERE id = ?").run(status, req.params.id);
+  res.json({ ok: true, status });
+});
+
+app.post("/api/staff/reports/:id/status", staffAuth, (req, res) => {
+  if (!requireStaffRole(req, res, ["moderator", "admin"])) return;
+  const status = String(req.body.status || "open").toLowerCase();
+  if (!["open", "review", "resolved", "rejected"].includes(status)) return res.status(400).json({ error: "Statut invalide." });
+  const report = db.prepare("SELECT * FROM takedown_reports WHERE id = ?").get(req.params.id);
+  if (!report) return res.status(404).json({ error: "Signalement introuvable." });
+  db.prepare("UPDATE takedown_reports SET status = ? WHERE id = ?").run(status, req.params.id);
+  if (status === "review") {
+    db.prepare("UPDATE releases SET moderation_status = 'review', scan_status = 'review', scan_notes = ? WHERE id = ?")
+      .run(`Copyright report moved to review by ${req.user.email}.`, report.release_id);
+  }
+  if (status === "resolved") {
+    db.prepare("UPDATE releases SET moderation_status = 'removed', scan_status = 'blocked', scan_notes = ? WHERE id = ?")
+      .run(`Copyright report resolved by ${req.user.email}; release removed.`, report.release_id);
+  }
   res.json({ ok: true, status });
 });
 

@@ -151,6 +151,38 @@ export function initDb() {
       clicks INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
+    CREATE TABLE IF NOT EXISTS testimonials (
+      user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      quote TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT '',
+      visible INTEGER NOT NULL DEFAULT 1,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS release_listens (
+      id TEXT PRIMARY KEY,
+      user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      release_id TEXT NOT NULL REFERENCES releases(id) ON DELETE CASCADE,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS promotion_campaigns (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      target_type TEXT NOT NULL,
+      release_id TEXT REFERENCES releases(id) ON DELETE SET NULL,
+      title TEXT NOT NULL,
+      url TEXT NOT NULL DEFAULT '',
+      image_url TEXT NOT NULL DEFAULT '',
+      spot TEXT NOT NULL,
+      daily_budget_cents INTEGER NOT NULL,
+      days INTEGER NOT NULL,
+      status TEXT NOT NULL DEFAULT 'active',
+      impressions INTEGER NOT NULL DEFAULT 0,
+      clicks INTEGER NOT NULL DEFAULT 0,
+      starts_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      ends_at TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
   `);
 
   const userColumns = db.prepare("PRAGMA table_info(users)").all().map((column) => column.name);
@@ -166,6 +198,9 @@ export function initDb() {
   addUserColumn("social_links", "TEXT NOT NULL DEFAULT '{}'");
   addUserColumn("workspace_visibility", "TEXT NOT NULL DEFAULT 'public'");
   addUserColumn("artist_slug", "TEXT NOT NULL DEFAULT ''");
+  addUserColumn("plan", "TEXT NOT NULL DEFAULT 'free'");
+  db.exec("UPDATE users SET plan = 'free' WHERE plan = 'creator'");
+  db.exec("UPDATE users SET plan = 'pro' WHERE pro = 1 AND plan = 'free'");
 
   const releaseColumns = db.prepare("PRAGMA table_info(releases)").all().map((column) => column.name);
   const addReleaseColumn = (name, definition) => {
@@ -209,13 +244,13 @@ function ensureBootstrapAdmin() {
 
   const existing = db.prepare("SELECT id FROM users WHERE email = ?").get(email);
   if (existing) {
-    db.prepare("UPDATE users SET role = 'admin', verified = 1, pro = 1 WHERE id = ?").run(existing.id);
+    db.prepare("UPDATE users SET role = 'admin', verified = 1, pro = 1, plan = 'pro' WHERE id = ?").run(existing.id);
     return;
   }
 
-  db.prepare(`INSERT INTO users (id, name, email, password_hash, avatar, genre, location, bio, verified, pro, role)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-    .run(id("usr"), name, email, hashPassword(password), initialsFor(name), "Electronic", "Production", "Platform owner.", 1, 1, "admin");
+  db.prepare(`INSERT INTO users (id, name, email, password_hash, avatar, genre, location, bio, verified, pro, role, plan)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(id("usr"), name, email, hashPassword(password), initialsFor(name), "Electronic", "Production", "Platform owner.", 1, 1, "admin", "pro");
 }
 
 function initialsFor(name) {
