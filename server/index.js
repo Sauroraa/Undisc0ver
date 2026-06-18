@@ -549,7 +549,7 @@ app.post("/api/releases", auth, (req, res) => {
   if (!title || !kind || !genre) return res.status(400).json({ error: "Titre, type et genre sont requis." });
   if (!audio_url) return res.status(400).json({ error: "Upload audio requis avant publication." });
   if (!rights_confirmed) return res.status(400).json({ error: "Confirmation des droits requise avant publication." });
-  if (!String(rights_owner || "").trim()) return res.status(400).json({ error: "Indique le titulaire des droits ou la licence utilisee." });
+  const autoRightsOwner = String(rights_owner || "").trim() || `${req.user.name} - Undiscover upload consent`;
   const releaseId = id("rel");
   const normalizedGateActions = download_enabled ? normalizeGateActions(gate_actions) : [];
   const gateLabel = normalizedGateActions.length
@@ -577,7 +577,7 @@ app.post("/api/releases", auth, (req, res) => {
       "green",
       download_enabled ? 1 : 0,
       1,
-      String(rights_owner).trim(),
+      autoRightsOwner,
       scan.status,
       scan.provider,
       scan.score,

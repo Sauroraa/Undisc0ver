@@ -3138,6 +3138,26 @@ h1, h2, h3, p { margin-top: 0; }
 .check-line input {
   margin-top: 3px;
 }
+.rights-auto-card {
+  background: rgba(44,255,143,.06);
+  border: 1px solid rgba(44,255,143,.2);
+  border-radius: 10px;
+  display: grid;
+  gap: 5px;
+  padding: 13px;
+}
+.rights-auto-card span,
+.rights-auto-card small {
+  color: var(--muted);
+}
+.rights-auto-card span {
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+.rights-auto-card strong {
+  color: white;
+}
 .scan-policy-grid {
   display: grid;
   gap: 8px;

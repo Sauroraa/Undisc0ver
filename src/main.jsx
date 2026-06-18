@@ -4145,6 +4145,7 @@ function UploadPage({ notify }) {
   const [error, setError] = useState("");
   const { data: copyrightConfig } = useData("/copyright/config", []);
   if (!user) return <AuthRequired />;
+  const autoRightsOwner = `${user.name || "Artist"} - Undiscover upload consent`;
   const update = (key, value) => setForm((current) => ({ ...current, [key]: value }));
   const chooseKind = (kind) => {
     setForm((current) => ({ ...current, kind, tracks: kind === "Track" ? 1 : Math.max(2, Number(current.tracks) || 2) }));
@@ -4171,12 +4172,14 @@ function UploadPage({ notify }) {
     setError("");
     try {
       if (!file) throw new Error("Ajoute un fichier audio avant publication.");
+      if (!form.rights_confirmed) throw new Error("Confirme les droits avant de publier.");
       const selectedAudioFiles = audioFiles.length ? audioFiles : [file];
       const uploadedTracks = await Promise.all(selectedAudioFiles.map((audioFile) => uploadAudio(audioFile)));
       const uploadedAudio = uploadedTracks[0];
       const uploadedCover = coverFile ? await uploadImage(coverFile) : null;
       const payload = {
         ...form,
+        rights_owner: autoRightsOwner,
         tracks: form.kind === "Track" ? 1 : Math.max(Number(form.tracks) || 1, uploadedTracks.length),
         audio_url: uploadedAudio.url,
         audio_file_name: uploadedAudio.name,
@@ -4214,7 +4217,7 @@ function UploadPage({ notify }) {
         {step === 1 && <section className="upload-step-card"><h2>Choose release format</h2><div className="upload-kind-grid">{uploadKinds.map((item) => <button type="button" className={form.kind === item.id ? "selected" : ""} key={item.id} onClick={() => chooseKind(item.id)}><b>{item.title}</b><small>{item.text}</small></button>)}</div></section>}
         {step === 2 && <section className="upload-step-card"><h2>Upload audio and artwork</h2><FileUploadPanel file={file} files={audioFiles} setFiles={(nextFiles) => { setAudioFiles(nextFiles); setFile(nextFiles[0] || null); update("tracks", form.kind === "Track" ? 1 : Math.max(1, nextFiles.length)); }} setFile={setFile} notify={notify} multiple={form.kind !== "Track"} onDurationChange={(seconds) => update("duration", formatDuration(seconds))} /><ImageUploadPanel file={coverFile} setFile={setCoverFile} title="Cover artwork" text="Upload a square JPG, PNG or WebP cover for this release." defaultWidth={1400} defaultHeight={1400} /></section>}
         {step === 3 && <section className="upload-step-card"><h2>Release details</h2><label>Track title<input value={form.title} onChange={(e) => update("title", e.target.value)} placeholder="e.g. Your release title" required /></label><div className="form-grid"><label>Type<select value={form.kind} onChange={(e) => update("kind", e.target.value)}><option>Track</option><option>EP</option><option>Dubpack</option></select></label><label>Genre<select value={form.genre} onChange={(e) => update("genre", e.target.value)}><option>Tech House</option><option>Techno</option><option>Melodic</option><option>Afro House</option><option>Drum & Bass</option><option>Hard Techno</option><option>Riddim</option><option>Dubstep</option></select></label><label>Tracks<input type="number" min="1" value={form.tracks} onChange={(e) => update("tracks", e.target.value)} /></label><label>Duration<input value={form.duration} onChange={(e) => update("duration", e.target.value)} /></label></div><label>Visibility<select value={form.visibility} onChange={(e) => update("visibility", e.target.value)}><option value="public">Public</option><option value="unlisted">Unlisted</option><option value="private">Private</option></select></label><label>Description<textarea value={form.description} onChange={(e) => update("description", e.target.value)} placeholder="Describe the release..." /></label></section>}
-        {step === 4 && <section className="upload-step-card"><h2>Pricing, access and rights</h2><div className="segmented"><button type="button" className={form.free ? "active" : ""} onClick={() => update("free", true)}>Free</button><button type="button" className={!form.free ? "active" : ""} onClick={() => update("free", false)}>Fixed price</button></div>{!form.free && <div className="secure-preview-note"><ShieldCheck size={16} /><span>Paid releases only expose a signed 45-second preview. The full audio stays private until checkout/download rules allow access.</span></div>}{!form.free && <label>Price EUR<input type="number" min="1" value={form.price} onChange={(e) => update("price", e.target.value)} /></label>}<section className="download-gate-builder"><div className="gate-builder-head"><div><span className="eyebrow">Download gateway</span><h3>Choose fan actions before download.</h3><p>Build a clean gate: fans complete selected actions, then the WAV unlocks.</p></div><strong>{form.download_enabled ? `${form.gate_actions.length} action${form.gate_actions.length > 1 ? "s" : ""}` : "Stream only"}</strong></div><label className="check-line gate-download-toggle"><input type="checkbox" checked={form.download_enabled} onChange={(e) => update("download_enabled", e.target.checked)} /><span><b>Enable downloadable WAV</b><small>Turn off for stream-only releases.</small></span></label>{form.download_enabled ? <div className="gate-action-grid">{DOWNLOAD_GATE_ACTIONS.map((action) => <button type="button" className={form.gate_actions.includes(action.id) ? "selected" : ""} onClick={() => toggleGate(action.id)} key={action.id}><GateActionIcon action={action.id} /><span><b>{action.label}</b><small>{action.description}</small></span>{form.gate_actions.includes(action.id) && <Check size={16} />}</button>)}</div> : <p className="muted">Stream-only mode: buy/listen pages stay live, WAV download stays hidden.</p>}{form.download_enabled && <div className="gate-summary"><ShieldCheck size={16} /><span>{form.gate_actions.length ? `Fans must complete: ${form.gate_actions.map(gateActionLabel).join(" + ")}.` : "No action selected: the WAV button unlocks instantly after login."}</span></div>}</section><CopyrightCompliancePanel form={form} update={update} config={copyrightConfig} /></section>}
+        {step === 4 && <section className="upload-step-card"><h2>Pricing, access and rights</h2><div className="segmented"><button type="button" className={form.free ? "active" : ""} onClick={() => update("free", true)}>Free</button><button type="button" className={!form.free ? "active" : ""} onClick={() => update("free", false)}>Fixed price</button></div>{!form.free && <div className="secure-preview-note"><ShieldCheck size={16} /><span>Paid releases only expose a signed 45-second preview. The full audio stays private until checkout/download rules allow access.</span></div>}{!form.free && <label>Price EUR<input type="number" min="1" value={form.price} onChange={(e) => update("price", e.target.value)} /></label>}<section className="download-gate-builder"><div className="gate-builder-head"><div><span className="eyebrow">Download gateway</span><h3>Choose fan actions before download.</h3><p>Build a clean gate: fans complete selected actions, then the WAV unlocks.</p></div><strong>{form.download_enabled ? `${form.gate_actions.length} action${form.gate_actions.length > 1 ? "s" : ""}` : "Stream only"}</strong></div><label className="check-line gate-download-toggle"><input type="checkbox" checked={form.download_enabled} onChange={(e) => update("download_enabled", e.target.checked)} /><span><b>Enable downloadable WAV</b><small>Turn off for stream-only releases.</small></span></label>{form.download_enabled ? <div className="gate-action-grid">{DOWNLOAD_GATE_ACTIONS.map((action) => <button type="button" className={form.gate_actions.includes(action.id) ? "selected" : ""} onClick={() => toggleGate(action.id)} key={action.id}><GateActionIcon action={action.id} /><span><b>{action.label}</b><small>{action.description}</small></span>{form.gate_actions.includes(action.id) && <Check size={16} />}</button>)}</div> : <p className="muted">Stream-only mode: buy/listen pages stay live, WAV download stays hidden.</p>}{form.download_enabled && <div className="gate-summary"><ShieldCheck size={16} /><span>{form.gate_actions.length ? `Fans must complete: ${form.gate_actions.map(gateActionLabel).join(" + ")}.` : "No action selected: the WAV button unlocks instantly after login."}</span></div>}</section><CopyrightCompliancePanel form={form} update={update} config={copyrightConfig} rightsOwner={autoRightsOwner} /></section>}
         {error && <p className="error">{error}</p>}
         <div className="upload-step-actions">{step > 1 && <button className="button ghost" type="button" onClick={() => setStep((current) => Math.max(1, current - 1))}>Back</button>}{step < 4 ? <button className="button accent" type="button" onClick={nextStep}>Continue</button> : <button className="button accent" type="submit"><Upload size={17} /> Publish release</button>}</div>
       </form>
@@ -4222,7 +4225,7 @@ function UploadPage({ notify }) {
   );
 }
 
-function CopyrightCompliancePanel({ form, update, config }) {
+function CopyrightCompliancePanel({ form, update, config, rightsOwner }) {
   return (
     <section className="copyright-panel">
       <div className="copyright-panel-head">
@@ -4232,10 +4235,14 @@ function CopyrightCompliancePanel({ form, update, config }) {
           <p>Every upload is consent-logged and scanned before public publishing.</p>
         </div>
       </div>
-      <label>Rights owner or license holder<input value={form.rights_owner} onChange={(e) => update("rights_owner", e.target.value)} placeholder="e.g. Artist name / label entity" /></label>
+      <div className="rights-auto-card">
+        <span>Declaration auto</span>
+        <strong>{rightsOwner}</strong>
+        <small>Le site joint automatiquement le compte artiste, l'horodatage et le scan copyright a cette publication.</small>
+      </div>
       <label className="check-line">
         <input type="checkbox" checked={form.rights_confirmed} onChange={(e) => update("rights_confirmed", e.target.checked)} />
-        <span>I confirm I own the rights to this audio or have a valid license to publish, share and sell it on Undiscover.</span>
+        <span>Je confirme posseder les droits de cet audio ou avoir une licence valide pour le publier, le partager et le vendre sur Undiscover.</span>
       </label>
       <div className="scan-policy-grid">
         <span><b>Active</b> rights check</span>
