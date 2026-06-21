@@ -136,9 +136,8 @@ function sessionHash(req) {
 function computeCampaignPrice(campaignType, days) {
   const catalog = CAMPAIGN_CATALOG[campaignType];
   if (!catalog) return null;
-  const price = catalog.prices_cents[days];
-  if (price === undefined) return null;
-  return price;
+  if (!Object.prototype.hasOwnProperty.call(catalog.prices_cents, days)) return null;
+  return catalog.prices_cents[days];
 }
 
 function validateCampaignContent(campaign) {
@@ -315,7 +314,7 @@ campaignsRouter.post("/", authRequired, rl(10, 60_000), (req, res) => {
 
   const catalog = CAMPAIGN_CATALOG[campaign_type];
   const daysInt = Number(days);
-  if (!daysInt || !catalog.prices_cents[daysInt]) return res.status(400).json({ error: `Durée invalide. Options: ${Object.keys(catalog.prices_cents).join(", ")} jours.` });
+  if (!Number.isInteger(daysInt) || !Object.prototype.hasOwnProperty.call(catalog.prices_cents, daysInt)) return res.status(400).json({ error: `Durée invalide. Options: ${Object.keys(catalog.prices_cents).join(", ")} jours.` });
 
   // Validate content
   const contentCheck = validateCampaignContent({ target_type, release_id });
@@ -327,6 +326,8 @@ campaignsRouter.post("/", authRequired, rl(10, 60_000), (req, res) => {
   if (campaign_type === "new_talent") {
     const followers = db.prepare("SELECT COUNT(*) total FROM follows WHERE artist_id = ?").get(req.user.id).total;
     if (followers > 500) return res.status(400).json({ error: "Ce programme est réservé aux artistes avec moins de 500 followers." });
+    const plays = db.prepare("SELECT COALESCE(SUM(plays), 0) total FROM releases WHERE user_id = ? AND moderation_status != 'removed'").get(req.user.id).total;
+    if (plays > 5000) return res.status(400).json({ error: "Ce programme est réservé aux nouveaux talents avec moins de 5 000 écoutes." });
   }
 
   // Parallel campaign limit
@@ -471,7 +472,6 @@ campaignsRouter.get("/:id/report", authRequired, (req, res) => {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 campaignsRouter.post("/:id/checkout", authRequired, rl(5, 60_000), async (req, res) => {
-  if (!stripe) return res.status(503).json({ error: "Le paiement n'est pas encore configuré." });
   const campaign = db.prepare("SELECT * FROM promotion_campaigns WHERE id = ? AND user_id = ? AND status = 'draft'").get(req.params.id, req.user.id);
   if (!campaign) return res.status(404).json({ error: "Campagne introuvable ou déjà payée." });
 
@@ -488,6 +488,8 @@ campaignsRouter.post("/:id/checkout", authRequired, rl(5, 60_000), async (req, r
     db.prepare("UPDATE promotion_campaigns SET status = ?, starts_at = CURRENT_TIMESTAMP, ends_at = datetime('now', '+' || days || ' days') WHERE id = ?").run(newStatus, campaign.id);
     return res.json({ ok: true, free: true, status: newStatus });
   }
+
+  if (!stripe) return res.status(503).json({ error: "Le paiement n'est pas encore configuré." });
 
   const catalog = CAMPAIGN_CATALOG[campaign.campaign_type] || {};
   const session = await stripe.checkout.sessions.create({

@@ -6079,8 +6079,12 @@ function CampaignCreateWizard({ releases, notify, onDone }) {
       const res = await request("/campaigns", { method: "POST", body: JSON.stringify({ ...form, title: form.title || selectedRelease?.title || meta.label, target_type: "release" }) });
       setIssues(res.content_issues || []);
       const campaign = res.campaign;
-      if (priceCents === 0) { notify("Campagne activée !"); onDone?.(); return; }
       const checkout = await request(`/campaigns/${campaign.id}/checkout`, { method: "POST" });
+      if (checkout.free) {
+        notify(checkout.status === "under_review" ? "Campagne gratuite envoyée en validation." : "Campagne gratuite activée !");
+        onDone?.();
+        return;
+      }
       if (checkout.url) { window.location.href = checkout.url; return; }
       notify("Campagne créée."); onDone?.();
     } catch (e) { setError(e.message); } finally { setBusy(false); }
@@ -6217,7 +6221,7 @@ function CampaignRow({ campaign, onAction, actionBusy }) {
         <span><b>{money(Number(campaign.budget_cents || 0))}</b><em>budget</em></span>
       </div>
       <div className="campaign-row-actions">
-        {["pending_payment", "draft"].includes(campaign.status) && <button className="button accent" type="button" disabled={actionBusy === `${campaign.id}:checkout`} onClick={() => onAction(campaign, "checkout")}>{actionBusy === `${campaign.id}:checkout` ? <Loader2 className="spin" size={14} /> : <CreditCard size={14} />} Payer</button>}
+        {["pending_payment", "draft"].includes(campaign.status) && <button className="button accent" type="button" disabled={actionBusy === `${campaign.id}:checkout`} onClick={() => onAction(campaign, "checkout")}>{actionBusy === `${campaign.id}:checkout` ? <Loader2 className="spin" size={14} /> : Number(campaign.budget_cents) === 0 ? <Sparkles size={14} /> : <CreditCard size={14} />} {Number(campaign.budget_cents) === 0 ? "Activer" : "Payer"}</button>}
         {campaign.status === "active" && <button className="button ghost" type="button" disabled={actionBusy === `${campaign.id}:pause`} onClick={() => onAction(campaign, "pause")}>{actionBusy === `${campaign.id}:pause` ? <Loader2 className="spin" size={14} /> : <Pause size={14} />} Pause</button>}
         {campaign.status === "paused" && <button className="button ghost" type="button" disabled={actionBusy === `${campaign.id}:resume`} onClick={() => onAction(campaign, "resume")}>{actionBusy === `${campaign.id}:resume` ? <Loader2 className="spin" size={14} /> : <Play size={14} />} Reprendre</button>}
         {["draft", "pending_payment", "paid", "under_review", "active", "paused"].includes(campaign.status) && <button className="button ghost campaign-stop" type="button" disabled={actionBusy === `${campaign.id}:cancel`} onClick={() => onAction(campaign, "cancel")}><X size={14} /></button>}
@@ -6309,6 +6313,11 @@ function CampaignManager({ releases, notify }) {
     try {
       if (action === "checkout") {
         const result = await request(`/campaigns/${campaign.id}/checkout`, { method: "POST" });
+        if (result.free) {
+          notify(result.status === "under_review" ? "Campagne gratuite envoyée en validation." : "Campagne gratuite activée.");
+          setRefreshKey(k => k + 1);
+          return;
+        }
         if (result.url) { window.location.href = result.url; return; }
         notify("Campagne activée."); setRefreshKey(k => k + 1);
       } else if (action === "pause") {
