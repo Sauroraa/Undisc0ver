@@ -1727,7 +1727,7 @@ function App() {
 }
 
 function MusicPlayer({ release, isPlaying, setIsPlaying, onClose, notify }) {
-  const [progress, setProgress] = useState(0);
+  const [currentTime, setCurrentTime] = useState(0);
   const [playerDuration, setPlayerDuration] = useState(0);
   const [waveform, setWaveform] = useState([]);
   const audioRef = useRef(null);
@@ -1736,11 +1736,12 @@ function MusicPlayer({ release, isPlaying, setIsPlaying, onClose, notify }) {
   const elementDuration = audioRef.current?.duration && Number.isFinite(audioRef.current.duration) ? audioRef.current.duration : 0;
   const rawAudioDuration = playerDuration || elementDuration || (previewLimit ? previewLimit : storedDuration);
   const audioDuration = previewLimit ? Math.min(previewLimit, rawAudioDuration) : rawAudioDuration;
-  const currentSeconds = Math.min(audioDuration, Math.floor((progress / 100) * audioDuration));
+  const currentSeconds = Math.min(audioDuration, currentTime);
+  const progress = audioDuration ? (currentSeconds / audioDuration) * 100 : 0;
   const waveBars = waveform.length ? waveform : fallbackWaveform(`${release?.title || ""}${release?.artist || ""}`);
 
   useEffect(() => {
-    setProgress(0);
+    setCurrentTime(0);
     setPlayerDuration(0);
     setWaveform([]);
     if (audioRef.current) {
@@ -1781,17 +1782,33 @@ function MusicPlayer({ release, isPlaying, setIsPlaying, onClose, notify }) {
     return undefined;
   }, [release, isPlaying]);
 
+  useEffect(() => {
+    if (!isPlaying) return undefined;
+    let frame;
+    const syncClock = () => {
+      const audio = audioRef.current;
+      if (audio) setCurrentTime(Math.min(audio.currentTime, audioDuration || audio.currentTime));
+      frame = requestAnimationFrame(syncClock);
+    };
+    frame = requestAnimationFrame(syncClock);
+    return () => cancelAnimationFrame(frame);
+  }, [isPlaying, audioDuration]);
+
   if (!release) return null;
   const seek = (percent) => {
     const audio = audioRef.current;
-    setProgress(percent);
-    if (audio?.duration && Number.isFinite(audio.duration)) audio.currentTime = (percent / 100) * audioDuration;
+    const nextTime = (percent / 100) * audioDuration;
+    setCurrentTime(nextTime);
+    if (audio?.duration && Number.isFinite(audio.duration)) audio.currentTime = nextTime;
   };
 
   return (
     <aside className="music-player" aria-label="Now playing">
       {release.audio_url && (
         <audio
+          id="undiscover-audio-player"
+          data-release-id={release.id}
+          data-playback-duration={audioDuration || ""}
           ref={audioRef}
           src={release.audio_url}
           onLoadedMetadata={(event) => {
@@ -1806,7 +1823,7 @@ function MusicPlayer({ release, isPlaying, setIsPlaying, onClose, notify }) {
               audio.currentTime = previewLimit;
               setIsPlaying(false);
             }
-            if (audioDuration) setProgress((Math.min(audio.currentTime, audioDuration) / audioDuration) * 100);
+            setCurrentTime(Math.min(audio.currentTime, audioDuration || audio.currentTime));
           }}
           onEnded={() => setIsPlaying(false)}
         />
@@ -4336,7 +4353,7 @@ function ReleaseDetail({ id, notify, playRelease }) {
   const { data, loading, error } = useData(`/releases/${id}`, [id]);
   const [reportOpen, setReportOpen] = useState(false);
   const [waveform, setWaveform] = useState([]);
-  const [playProgress, setPlayProgress] = useState(0);
+  const [playback, setPlayback] = useState({ currentTime: 0, duration: 0 });
   const [showPlaylist, setShowPlaylist] = useState(false);
   const rafRef = useRef(null);
   const release = data?.release;
@@ -4352,27 +4369,36 @@ function ReleaseDetail({ id, notify, playRelease }) {
 
   useEffect(() => {
     const tick = () => {
-      const audio = document.querySelector("audio");
-      if (audio && audio.duration && Number.isFinite(audio.duration)) {
-        setPlayProgress((audio.currentTime / audio.duration) * 100);
+      const audio = document.getElementById("undiscover-audio-player");
+      if (audio?.dataset.releaseId === String(release?.id) && audio.duration && Number.isFinite(audio.duration)) {
+        const duration = Number(audio.dataset.playbackDuration) || audio.duration;
+        const currentTime = Math.min(audio.currentTime, duration);
+        setPlayback((current) => (
+          Math.abs(current.currentTime - currentTime) > 0.025 || current.duration !== duration
+            ? { currentTime, duration }
+            : current
+        ));
+      } else {
+        setPlayback((current) => current.currentTime || current.duration ? { currentTime: 0, duration: 0 } : current);
       }
       rafRef.current = requestAnimationFrame(tick);
     };
     rafRef.current = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafRef.current);
-  }, []);
+  }, [release?.id]);
 
   const seekWave = (e) => {
-    const audio = document.querySelector("audio");
-    if (!audio || !audio.duration) return;
+    const audio = document.getElementById("undiscover-audio-player");
+    if (!audio || audio.dataset.releaseId !== String(release?.id) || !audio.duration) return;
     const rect = e.currentTarget.getBoundingClientRect();
     const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-    audio.currentTime = pct * audio.duration;
+    audio.currentTime = pct * (Number(audio.dataset.playbackDuration) || audio.duration);
   };
 
   if (loading) return <main className="page"><SkeletonList /></main>;
   if (error) return <ErrorPage message={error} />;
   const waveBars = waveform.length ? waveform : fallbackWaveform(`${release.title}${release.artist}`, 80);
+  const playProgress = playback.duration ? (playback.currentTime / playback.duration) * 100 : 0;
   const playedCount = Math.round((playProgress / 100) * waveBars.length);
   const profileHref = artistPath({ id: release.user_id, artist_slug: release.artist_slug });
   const shareUrl = `https://undisc0ver.com/release/${release.id}`;
@@ -4415,7 +4441,7 @@ function ReleaseDetail({ id, notify, playRelease }) {
             <div className="rd-wave-cursor" style={{ left: `${playProgress}%` }} />
           </div>
           <div className="rd-wave-times">
-            <span>{formatDuration(Math.round((playProgress / 100) * (parseDurationSeconds(release.duration) || 0)))}</span>
+            <span>{formatDuration(playback.currentTime)}</span>
             <span>{release.duration}</span>
           </div>
 
