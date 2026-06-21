@@ -3451,6 +3451,11 @@ function StaffPanel({ notify }) {
   const applicationStatus = async (id, status) => {
     await runStaffAction(() => request(`/staff/applications/${id}/status`, { method: "POST", body: JSON.stringify({ status }) }), "Application updated.");
   };
+  const payoutStatus = async (id, status) => {
+    const staffNote = status === "rejected" ? window.prompt("Raison du rejet (obligatoire)") : status === "paid" ? window.prompt("Référence de virement (optionnelle)") || "" : "";
+    if (status === "rejected" && !staffNote) return;
+    await runStaffAction(() => request(`/staff/payouts/${id}`, { method: "PATCH", body: JSON.stringify({ status, staff_note: staffNote }) }), "Payout updated.");
+  };
   return (
     <main className="page dashboard-page">
       <div className="staff-shell">
@@ -3461,6 +3466,7 @@ function StaffPanel({ notify }) {
           <Metric icon={<LifeBuoy />} label="Tickets" value={data.tickets.length} delta={`${data.tickets.filter((t) => t.status === "open").length} open`} />
           <Metric icon={<ShieldAlert />} label="Reports" value={data.reports.length} delta="copyright" />
           <Metric icon={<UserPlus />} label="Careers" value={(data.applications || []).length} delta={`${(data.applications || []).filter((item) => item.status === "new").length} new`} />
+          <Metric icon={<Wallet />} label="Payouts" value={(data.payouts || []).filter((item) => ["pending", "approved"].includes(item.status)).length} delta="finance queue" />
         </section>
         <div className="staff-grid">
           <section className="staff-card">
@@ -3544,6 +3550,22 @@ function StaffPanel({ notify }) {
                 </select>
               </div>
             )) : <p className="muted">No career applications yet.</p>}
+          </section>
+          <section className="staff-card staff-payout-card">
+            <SectionTitle title="Payout requests" />
+            {(data.payouts || []).length ? data.payouts.map((payout) => (
+              <div className="staff-payout-row" key={payout.id}>
+                <div><b>{payout.artist_name}</b><small>{payout.artist_email}</small></div>
+                <strong>{balanceMoney(payout.amount_cents)}</strong>
+                <span>{payout.method.toUpperCase()} · {payout.destination}</span>
+                <span className={`payout-status status-${payout.status}`}>{payout.status}</span>
+                <div className="staff-ticket-actions">
+                  {payout.status === "pending" && <button className="button ghost" disabled={!canAdmin} onClick={() => payoutStatus(payout.id, "approved")}><Check size={14} /> Approve</button>}
+                  {payout.status === "approved" && <button className="button accent" disabled={!canAdmin} onClick={() => payoutStatus(payout.id, "paid")}><Wallet size={14} /> Mark paid</button>}
+                  {["pending", "approved"].includes(payout.status) && <button className="button ghost payout-reject" disabled={!canAdmin} onClick={() => payoutStatus(payout.id, "rejected")}><X size={14} /> Reject</button>}
+                </div>
+              </div>
+            )) : <p className="muted">No payout requests.</p>}
           </section>
         </div>
       </div>
@@ -6759,8 +6781,42 @@ function Analytics({ releases, stats }) {
 }
 
 function Payouts({ stats, notify }) {
-  const availableBalance = Number(stats.available_balance ?? stats.revenue ?? 0);
-  return <section className="card payouts"><Wallet size={32} /><h2>{balanceMoney(availableBalance)} available</h2><p className="muted">Payout ledger from completed purchases.</p><button className="button accent" onClick={() => notify("Payout request queued.")}>Request payout</button></section>;
+  const [refreshKey, setRefreshKey] = useState(0);
+  const { data, loading, error } = useData("/me/payouts", [refreshKey]);
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [form, setForm] = useState({ amount: "", method: "iban", account_holder: "", destination: "", note: "" });
+  const summary = data?.summary || { available_balance: Number(stats.available_balance || 0), payout_reserved: Number(stats.payout_reserved || 0), payout_paid: Number(stats.payout_paid || 0), payout_minimum: 2000 };
+  const requests = data?.requests || [];
+  useEffect(() => {
+    if (!form.amount && summary.available_balance) setForm((current) => ({ ...current, amount: (summary.available_balance / 100).toFixed(2) }));
+  }, [summary.available_balance]);
+  const update = (key, value) => setForm((current) => ({ ...current, [key]: value }));
+  const submit = async (event) => {
+    event.preventDefault();
+    setBusy(true);
+    try {
+      await request("/me/payouts", { method: "POST", body: JSON.stringify({ ...form, amount_cents: Math.round(Number(form.amount) * 100) }) });
+      notify("Demande de versement envoyée.");
+      setOpen(false);
+      setForm((current) => ({ ...current, amount: "", destination: "", note: "" }));
+      setRefreshKey((value) => value + 1);
+    } catch (err) { notify(err.message); }
+    finally { setBusy(false); }
+  };
+  if (loading) return <SkeletonList />;
+  if (error) return <ErrorPage message={error} />;
+  return (
+    <section className="payout-console">
+      <div className="payout-summary-grid">
+        <article className="payout-balance-card"><span className="eyebrow">Disponible</span><strong>{balanceMoney(summary.available_balance)}</strong><p>Revenus encaissés et non encore réservés.</p><button className="button accent" disabled={summary.available_balance < summary.payout_minimum} onClick={() => setOpen((value) => !value)}>{open ? <X size={16} /> : <Wallet size={16} />}{open ? "Fermer" : "Demander un versement"}</button>{summary.available_balance < summary.payout_minimum && <small>Minimum requis: {balanceMoney(summary.payout_minimum)}</small>}</article>
+        <article><span>En traitement</span><strong>{balanceMoney(summary.payout_reserved)}</strong><small>Demandes en attente ou approuvées</small></article>
+        <article><span>Déjà versé</span><strong>{balanceMoney(summary.payout_paid)}</strong><small>Total des versements terminés</small></article>
+      </div>
+      {open && <form className="payout-request-form" onSubmit={submit}><div><span className="eyebrow">Nouvelle demande</span><h2>Coordonnées de versement</h2><p>La destination est chiffrée avant stockage. Vérifie-la attentivement.</p></div><div className="payout-form-fields"><label>Montant (EUR)<input type="number" min={summary.payout_minimum / 100} max={summary.available_balance / 100} step="0.01" value={form.amount} onChange={(e) => update("amount", e.target.value)} required /></label><label>Méthode<select value={form.method} onChange={(e) => update("method", e.target.value)}><option value="iban">Virement IBAN</option><option value="paypal">PayPal</option></select></label><label>Nom du bénéficiaire<input value={form.account_holder} maxLength={120} onChange={(e) => update("account_holder", e.target.value)} required /></label><label>{form.method === "iban" ? "IBAN" : "Email PayPal"}<input value={form.destination} onChange={(e) => update("destination", e.target.value)} placeholder={form.method === "iban" ? "BE00 0000 0000 0000" : "artiste@example.com"} required /></label><label className="full">Note <small>(optionnel)</small><textarea value={form.note} maxLength={300} onChange={(e) => update("note", e.target.value)} /></label><button className="button accent full" type="submit" disabled={busy}>{busy ? <Loader2 className="spin" size={16} /> : <ShieldCheck size={16} />} Confirmer la demande</button></div></form>}
+      <section className="payout-history"><div className="playlist-section-head"><div><span className="eyebrow">Registre</span><h2>Historique des versements</h2></div><span>{requests.length} demande{requests.length !== 1 ? "s" : ""}</span></div>{requests.length ? <div className="payout-list">{requests.map((item) => <article key={item.id}><span className={`payout-status status-${item.status}`}>{({ pending: "En attente", approved: "Approuvée", paid: "Payée", rejected: "Rejetée" })[item.status] || item.status}</span><strong>{balanceMoney(item.amount_cents)}</strong><span>{item.method === "iban" ? "IBAN" : "PayPal"} · ••••{item.destination_last4}</span><time>{new Date(item.created_at).toLocaleDateString("fr-FR")}</time>{item.staff_note && <small>{item.staff_note}</small>}</article>)}</div> : <div className="payout-empty"><Wallet size={22} /><p>Aucune demande de versement pour le moment.</p></div>}</section>
+    </section>
+  );
 }
 
 function PageHeader({ eyebrow, title, text }) {

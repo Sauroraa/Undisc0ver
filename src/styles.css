@@ -3655,6 +3655,35 @@ textarea { min-height: 120px; resize: vertical; }
 .bars .hot { background: var(--accent); }
 .analytics .chart-panel { margin-top: 18px; }
 .payouts { display: grid; gap: 10px; justify-items: start; }
+.payout-console { display: grid; gap: 20px; }
+.payout-summary-grid { display: grid; gap: 14px; grid-template-columns: 1.45fr 1fr 1fr; }
+.payout-summary-grid > article { background: linear-gradient(180deg,rgba(23,23,35,.98),rgba(14,14,23,.98)); border: 1px solid rgba(255,255,255,.09); border-radius: 17px; display: grid; gap: 8px; padding: 22px; }
+.payout-summary-grid > article > span { color: var(--muted); font-size: 11px; font-weight: 850; text-transform: uppercase; }
+.payout-summary-grid > article > strong { color: var(--accent); font-size: 30px; }
+.payout-summary-grid > article > small,.payout-summary-grid p { color: var(--muted); font-size: 12px; margin: 0; }
+.payout-balance-card { background: radial-gradient(circle at 90% 10%,rgba(212,232,87,.13),transparent 38%),linear-gradient(135deg,#191925,#0d0d15) !important; }
+.payout-balance-card > strong { font-size: clamp(38px,5vw,58px) !important; }
+.payout-balance-card .button { justify-self: start; margin-top: 8px; }
+.payout-request-form { background: linear-gradient(135deg,rgba(212,232,87,.07),rgba(18,18,28,.98) 45%); border: 1px solid rgba(212,232,87,.2); border-radius: 17px; display: grid; gap: 28px; grid-template-columns: .75fr 1.25fr; padding: 25px; }
+.payout-request-form h2 { margin: 6px 0; }
+.payout-request-form p { color: var(--muted); line-height: 1.5; margin: 0; }
+.payout-form-fields { display: grid; gap: 12px; grid-template-columns: repeat(2,minmax(0,1fr)); }
+.payout-form-fields label { color: white; display: grid; font-size: 12px; font-weight: 800; gap: 6px; }
+.payout-form-fields input,.payout-form-fields select,.payout-form-fields textarea { background: #0c0c13; border: 1px solid rgba(255,255,255,.12); color: white; width: 100%; }
+.payout-form-fields .full { grid-column: 1 / -1; }
+.payout-history { background: rgba(20,20,31,.75); border: 1px solid rgba(255,255,255,.08); border-radius: 17px; padding: 22px; }
+.payout-list { display: grid; gap: 8px; margin-top: 16px; }
+.payout-list article { align-items: center; background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.07); border-radius: 11px; display: grid; gap: 12px; grid-template-columns: 105px 110px 1fr 90px; padding: 12px; }
+.payout-list article > span:not(.payout-status),.payout-list time,.payout-list small { color: var(--muted); font-size: 11px; }
+.payout-list small { grid-column: 2 / -1; }
+.payout-status { border: 1px solid currentColor; border-radius: 999px; font-size: 9px; font-weight: 900; justify-self: start; padding: 4px 7px; text-transform: uppercase; }
+.payout-status.status-pending { color: #ffbf5b; }.payout-status.status-approved { color: #79b8ff; }.payout-status.status-paid { color: var(--accent); }.payout-status.status-rejected { color: #ff8585; }
+.payout-empty { align-items: center; color: var(--muted); display: flex; flex-direction: column; gap: 8px; padding: 30px; text-align: center; }
+.staff-payout-card { grid-column: 1 / -1; }
+.staff-payout-row { align-items: center; border-top: 1px solid rgba(255,255,255,.08); display: grid; gap: 12px; grid-template-columns: minmax(150px,1fr) 110px minmax(180px,1fr) 90px auto; padding: 13px 0; }
+.staff-payout-row:first-of-type { border-top: 0; }.staff-payout-row > div:first-child { display: grid; }.staff-payout-row small,.staff-payout-row > span:not(.payout-status) { color: var(--muted); font-size: 11px; }.payout-reject { color: #ff8585 !important; }
+@media (max-width:900px) { .payout-summary-grid { grid-template-columns: 1fr 1fr; }.payout-balance-card { grid-column: 1 / -1; }.payout-request-form { grid-template-columns: 1fr; }.staff-payout-row { grid-template-columns: 1fr 1fr; }.staff-payout-row .staff-ticket-actions { grid-column: 1 / -1; } }
+@media (max-width:620px) { .payout-summary-grid,.payout-form-fields { grid-template-columns: 1fr; }.payout-balance-card,.payout-form-fields .full { grid-column: 1; }.payout-list article { grid-template-columns: 1fr 1fr; }.payout-list small { grid-column: 1 / -1; }.staff-payout-row { grid-template-columns: 1fr; } }
 
 .auth-shell {
   background: var(--base);

@@ -117,6 +117,8 @@ const googleAuth = {
 
 // Audio tokens use a dedicated secret — fully isolated from OAuth state
 const audioSecret = process.env.AUDIO_TOKEN_SECRET || process.env.AUTH_STATE_SECRET || crypto.randomBytes(32).toString("hex");
+const payoutEncryptionKey = crypto.createHash("sha256").update(process.env.PAYOUT_ENCRYPTION_SECRET || process.env.AUTH_STATE_SECRET || audioSecret).digest();
+const payoutMinimumCents = Math.max(100, Number(process.env.PAYOUT_MIN_CENTS || 2000));
 
 // ── External services (optional — degrade gracefully when keys absent) ──────
 const stripe = process.env.STRIPE_SECRET_KEY ? new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: "2025-05-28.basil" }) : null;
@@ -426,6 +428,26 @@ function campaignSelect(where = "", order = "pc.created_at DESC") {
     ${where}
     ORDER BY ${order}
   `;
+}
+
+function payoutSummary(userId) {
+  const gross = db.prepare("SELECT COALESCE(SUM(p.amount_cents), 0) total FROM purchases p JOIN releases r ON r.id = p.release_id WHERE r.user_id = ? AND r.moderation_status != 'removed'").get(userId).total;
+  const ledger = db.prepare("SELECT COALESCE(SUM(CASE WHEN status IN ('pending','approved','paid') THEN amount_cents ELSE 0 END), 0) reserved, COALESCE(SUM(CASE WHEN status = 'paid' THEN amount_cents ELSE 0 END), 0) paid, COALESCE(SUM(CASE WHEN status IN ('pending','approved') THEN amount_cents ELSE 0 END), 0) pending FROM payout_requests WHERE user_id = ?").get(userId);
+  return { gross_balance: gross, available_balance: Math.max(0, gross - ledger.reserved), payout_reserved: ledger.pending, payout_paid: ledger.paid, payout_minimum: payoutMinimumCents };
+}
+
+function encryptPayoutDestination(value) {
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", payoutEncryptionKey, iv);
+  const encrypted = Buffer.concat([cipher.update(value, "utf8"), cipher.final()]);
+  return `${iv.toString("base64")}.${cipher.getAuthTag().toString("base64")}.${encrypted.toString("base64")}`;
+}
+
+function decryptPayoutDestination(payload) {
+  const [iv, tag, encrypted] = String(payload || "").split(".").map((part) => Buffer.from(part, "base64"));
+  const decipher = crypto.createDecipheriv("aes-256-gcm", payoutEncryptionKey, iv);
+  decipher.setAuthTag(tag);
+  return Buffer.concat([decipher.update(encrypted), decipher.final()]).toString("utf8");
 }
 
 function normalizeArtistSlug(value = "") {
@@ -1088,7 +1110,33 @@ app.get("/api/dashboard", auth, (req, res) => {
   const followers = db.prepare("SELECT COUNT(*) total FROM follows WHERE artist_id = ?").get(req.user.id).total;
   const comments = db.prepare("SELECT COUNT(*) total FROM release_comments rc JOIN releases r ON r.id = rc.release_id WHERE r.user_id = ?").get(req.user.id).total;
   const releases = db.prepare(releaseSelect("WHERE r.user_id = ? AND r.moderation_status != 'removed'", "r.created_at DESC")).all(req.user.id);
-  res.json({ stats: { ...stats, ...payoutStats, followers, comments }, releases: presentReleases(releases) });
+  res.json({ stats: { ...stats, ...payoutStats, ...payoutSummary(req.user.id), followers, comments }, releases: presentReleases(releases) });
+});
+
+app.get("/api/me/payouts", auth, (req, res) => {
+  const requests = db.prepare("SELECT id, amount_cents, method, account_holder, destination_last4, status, artist_note, staff_note, processed_at, created_at FROM payout_requests WHERE user_id = ? ORDER BY created_at DESC LIMIT 100").all(req.user.id);
+  res.json({ summary: payoutSummary(req.user.id), requests });
+});
+
+app.post("/api/me/payouts", auth, rateLimiter(5, 60 * 60_000), (req, res) => {
+  const summary = payoutSummary(req.user.id);
+  const amount = Math.floor(Number(req.body.amount_cents || summary.available_balance));
+  const method = String(req.body.method || "iban").toLowerCase();
+  const accountHolder = String(req.body.account_holder || "").trim().slice(0, 120);
+  const artistNote = String(req.body.note || "").trim().slice(0, 300);
+  let destination = String(req.body.destination || "").trim();
+  if (!accountHolder) return res.status(400).json({ error: "Nom du bénéficiaire requis." });
+  if (!['iban', 'paypal'].includes(method)) return res.status(400).json({ error: "Méthode de versement invalide." });
+  if (method === "iban") {
+    destination = destination.replace(/\s+/g, "").toUpperCase();
+    if (!/^[A-Z]{2}\d{2}[A-Z0-9]{11,30}$/.test(destination)) return res.status(400).json({ error: "IBAN invalide." });
+  } else if (!isValidEmail(destination)) return res.status(400).json({ error: "Adresse PayPal invalide." });
+  if (!Number.isInteger(amount) || amount < payoutMinimumCents) return res.status(400).json({ error: `Le montant minimum est de ${(payoutMinimumCents / 100).toFixed(2)} EUR.` });
+  if (amount > summary.available_balance) return res.status(400).json({ error: "Solde disponible insuffisant." });
+  const payoutId = id("pay");
+  db.prepare("INSERT INTO payout_requests (id, user_id, amount_cents, method, account_holder, destination_encrypted, destination_last4, artist_note) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+    .run(payoutId, req.user.id, amount, method, accountHolder, encryptPayoutDestination(destination), destination.slice(-4), artistNote);
+  res.status(201).json({ request: db.prepare("SELECT id, amount_cents, method, account_holder, destination_last4, status, artist_note, created_at FROM payout_requests WHERE id = ?").get(payoutId), summary: payoutSummary(req.user.id) });
 });
 
 app.get("/api/testimonials", (_req, res) => {
@@ -1277,13 +1325,34 @@ app.post("/api/campaigns/:id/click", (req, res) => {
   res.json({ ok: true });
 });
 
-app.get("/api/staff/overview", staffAuth, (_req, res) => {
+app.get("/api/staff/overview", staffAuth, (req, res) => {
   const users = db.prepare("SELECT id, name, email, avatar, avatar_url, role, verified, pro, plan, auth_provider, created_at FROM users ORDER BY created_at DESC").all();
   const releases = db.prepare(releaseSelect("WHERE r.moderation_status != 'removed'", "r.created_at DESC")).all();
   const tickets = db.prepare("SELECT * FROM support_tickets ORDER BY created_at DESC").all();
   const reports = db.prepare("SELECT tr.*, r.title release_title FROM takedown_reports tr JOIN releases r ON r.id = tr.release_id ORDER BY tr.created_at DESC").all();
   const applications = db.prepare("SELECT * FROM career_applications ORDER BY created_at DESC").all();
-  res.json({ users, releases: presentReleases(releases), tickets, reports, applications });
+  const payouts = db.prepare("SELECT pr.*, u.name artist_name, u.email artist_email FROM payout_requests pr JOIN users u ON u.id = pr.user_id ORDER BY pr.created_at DESC LIMIT 200").all().map((payout) => {
+    if (req.user.role !== "admin") return { ...payout, destination: `••••${payout.destination_last4}`, destination_encrypted: undefined };
+    try { return { ...payout, destination: decryptPayoutDestination(payout.destination_encrypted), destination_encrypted: undefined }; }
+    catch { return { ...payout, destination: `••••${payout.destination_last4}`, destination_encrypted: undefined }; }
+  });
+  res.json({ users, releases: presentReleases(releases), tickets, reports, applications, payouts });
+});
+
+app.patch("/api/staff/payouts/:id", staffAuth, (req, res) => {
+  if (!requireStaffRole(req, res, ["admin"])) return;
+  const payout = db.prepare("SELECT * FROM payout_requests WHERE id = ?").get(req.params.id);
+  if (!payout) return res.status(404).json({ error: "Demande de versement introuvable." });
+  const status = String(req.body.status || "").toLowerCase();
+  const staffNote = String(req.body.staff_note || "").trim().slice(0, 500);
+  const allowed = payout.status === "pending" ? ["approved", "rejected"] : payout.status === "approved" ? ["paid", "rejected"] : [];
+  if (!allowed.includes(status)) return res.status(400).json({ error: "Transition de statut invalide." });
+  if (status === "rejected" && !staffNote) return res.status(400).json({ error: "Une raison est requise pour rejeter la demande." });
+  db.prepare("UPDATE payout_requests SET status = ?, staff_note = ?, processed_by = ?, processed_at = CURRENT_TIMESTAMP WHERE id = ?")
+    .run(status, staffNote, req.user.id, payout.id);
+  const body = status === "paid" ? `Ton versement de ${(payout.amount_cents / 100).toFixed(2)} EUR a été marqué comme payé.` : status === "approved" ? "Ta demande de versement a été approuvée." : `Ta demande de versement a été rejetée: ${staffNote}`;
+  db.prepare("INSERT INTO notifications (id, user_id, type, body) VALUES (?, ?, 'payout', ?)").run(id("ntf"), payout.user_id, body);
+  res.json({ ok: true, status });
 });
 
 app.post("/api/staff/users/:id/role", staffAuth, (req, res) => {

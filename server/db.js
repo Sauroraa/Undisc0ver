@@ -146,6 +146,21 @@ export function initDb() {
       assignee_role TEXT NOT NULL DEFAULT 'Staff',
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
+    CREATE TABLE IF NOT EXISTS payout_requests (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      amount_cents INTEGER NOT NULL,
+      method TEXT NOT NULL,
+      account_holder TEXT NOT NULL,
+      destination_encrypted TEXT NOT NULL,
+      destination_last4 TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      artist_note TEXT NOT NULL DEFAULT '',
+      staff_note TEXT NOT NULL DEFAULT '',
+      processed_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+      processed_at TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
     CREATE TABLE IF NOT EXISTS short_links (
       code TEXT PRIMARY KEY,
       user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
@@ -332,6 +347,7 @@ export function initDb() {
     CREATE INDEX IF NOT EXISTS idx_reposts_user_id ON reposts (user_id);
     CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications (user_id, read, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_password_resets_user_id ON password_resets (user_id);
+    CREATE INDEX IF NOT EXISTS idx_payout_requests_user_status ON payout_requests (user_id, status, created_at DESC);
   `);
 
   const isProduction = process.env.NODE_ENV === "production";

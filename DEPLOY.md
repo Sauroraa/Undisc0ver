@@ -58,3 +58,13 @@ https://undisc0ver.com/api/webhooks/stripe
 ```
 
 After changing `.env`, recreate the app container with `docker compose up -d --force-recreate --wait`.
+
+## Payout encryption
+
+Set a stable, unique secret before accepting payout requests. Changing it later makes existing encrypted IBAN/PayPal destinations unreadable.
+
+```bash
+PAYOUT_ENCRYPTION_SECRET="$(openssl rand -hex 32)"
+```
+
+Store that value in `.env`. `PAYOUT_MIN_CENTS=2000` sets the default minimum request to 20 EUR. Payout destinations are visible only to admins and payout status changes are recorded in the database.
