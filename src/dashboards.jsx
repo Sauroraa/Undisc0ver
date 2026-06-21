@@ -1887,7 +1887,7 @@ export function LabelDashboard({ notify }) {
 
   return (
     <DashboardShell sidebar={
-      <Sidebar title="Label Dashboard" subtitle={user.name} items={items} section={section} setSection={setSection}
+      <Sidebar title="Label Dashboard" subtitle={data?.profile?.name || "Mon label"} items={items} section={section} setSection={setSection}
         footer={
           <div className="db-sidebar-footer">
             <span className="role-chip role-label">label</span>
@@ -1986,6 +1986,17 @@ function LabelBranding({ profile, notify, onRefresh }) {
   });
   const [saving, setSaving] = useState(false);
   const update = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  useEffect(() => {
+    setForm({
+      name: profile?.name || "",
+      bio: profile?.bio || "",
+      avatar_url: profile?.avatar_url || "",
+      banner_url: profile?.banner_url || "",
+      genre: profile?.genre || "",
+      location: profile?.location || "",
+    });
+  }, [profile?.name, profile?.updated_at]);
 
   const save = async () => {
     setSaving(true);

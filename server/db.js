@@ -410,6 +410,18 @@ export function initDb() {
       added_at   TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       PRIMARY KEY (label_id, artist_id)
     );
+    CREATE TABLE IF NOT EXISTS label_profiles (
+      user_id     TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      name        TEXT NOT NULL DEFAULT '',
+      bio         TEXT NOT NULL DEFAULT '',
+      avatar_url  TEXT NOT NULL DEFAULT '',
+      banner_url  TEXT NOT NULL DEFAULT '',
+      genre       TEXT NOT NULL DEFAULT '',
+      location    TEXT NOT NULL DEFAULT '',
+      social_links TEXT NOT NULL DEFAULT '{}',
+      created_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
   `);
 
   const userColumns = db.prepare("PRAGMA table_info(users)").all().map((column) => column.name);

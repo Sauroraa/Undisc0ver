@@ -638,8 +638,18 @@ dashboardsRouter.get("/label", authMiddleware, (req, res) => {
   if (!requireLabelAccess(req, res)) return;
   const labelId = req.user.id;
 
-  // Label profile (from users table)
-  const profile = db.prepare("SELECT id, name, bio, avatar_url, banner_url, genre, location, social_links FROM users WHERE id = ?").get(labelId);
+  // Label identity is intentionally separate from the owner's artist profile.
+  const savedProfile = db.prepare("SELECT user_id id, name, bio, avatar_url, banner_url, genre, location, social_links FROM label_profiles WHERE user_id = ?").get(labelId);
+  const profile = savedProfile || {
+    id: labelId,
+    name: "",
+    bio: "",
+    avatar_url: "",
+    banner_url: "",
+    genre: "",
+    location: "",
+    social_links: "{}"
+  };
 
   // Roster of artists
   const roster = db.prepare(`
@@ -718,19 +728,33 @@ dashboardsRouter.get("/label", authMiddleware, (req, res) => {
 dashboardsRouter.patch("/label/branding", authMiddleware, (req, res) => {
   if (!requireLabelAccess(req, res)) return;
   const { name, bio, avatar_url, banner_url, genre, location, social_links } = req.body;
-  const updates = [];
-  const params = [];
-  if (name) { updates.push("name = ?"); params.push(String(name).slice(0, 80)); }
-  if (bio !== undefined) { updates.push("bio = ?"); params.push(String(bio).slice(0, 500)); }
-  if (avatar_url !== undefined) { updates.push("avatar_url = ?"); params.push(String(avatar_url)); }
-  if (banner_url !== undefined) { updates.push("banner_url = ?"); params.push(String(banner_url)); }
-  if (genre) { updates.push("genre = ?"); params.push(String(genre)); }
-  if (location !== undefined) { updates.push("location = ?"); params.push(String(location).slice(0, 80)); }
-  if (social_links) { updates.push("social_links = ?"); params.push(JSON.stringify(social_links)); }
-  if (!updates.length) return res.status(400).json({ error: "Rien à mettre à jour." });
-  params.push(req.user.id);
-  db.prepare(`UPDATE users SET ${updates.join(", ")} WHERE id = ?`).run(...params);
-  res.json({ ok: true });
+  const labelName = String(name || "").trim().slice(0, 80);
+  if (labelName.length < 2) return res.status(400).json({ error: "Le nom du label doit contenir au moins 2 caractères." });
+  const links = typeof social_links === "string" ? social_links : JSON.stringify(social_links || {});
+  db.prepare(`
+    INSERT INTO label_profiles (user_id, name, bio, avatar_url, banner_url, genre, location, social_links, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(user_id) DO UPDATE SET
+      name = excluded.name,
+      bio = excluded.bio,
+      avatar_url = excluded.avatar_url,
+      banner_url = excluded.banner_url,
+      genre = excluded.genre,
+      location = excluded.location,
+      social_links = excluded.social_links,
+      updated_at = CURRENT_TIMESTAMP
+  `).run(
+    req.user.id,
+    labelName,
+    String(bio || "").trim().slice(0, 500),
+    String(avatar_url || "").trim().slice(0, 1000),
+    String(banner_url || "").trim().slice(0, 1000),
+    String(genre || "").trim().slice(0, 80),
+    String(location || "").trim().slice(0, 80),
+    links.slice(0, 2000)
+  );
+  const profile = db.prepare("SELECT user_id id, name, bio, avatar_url, banner_url, genre, location, social_links FROM label_profiles WHERE user_id = ?").get(req.user.id);
+  res.json({ ok: true, profile });
 });
 
 // Add artist to roster
