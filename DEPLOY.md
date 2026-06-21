@@ -46,3 +46,15 @@ Nginx is already configured for `undisc0ver.com` and `www.undisc0ver.com`. After
 ```bash
 apt install -y certbot python3-certbot-nginx && certbot --nginx -d undisc0ver.com -d www.undisc0ver.com
 ```
+
+## Stripe campaigns and payments
+
+Campaigns are created as pending and become active only after Stripe confirms payment. Configure real values in `.env` for `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` (plus the subscription price IDs when plans are sold).
+
+In the Stripe dashboard, register this production webhook and subscribe it to `checkout.session.completed`:
+
+```text
+https://undisc0ver.com/api/webhooks/stripe
+```
+
+After changing `.env`, recreate the app container with `docker compose up -d --force-recreate --wait`.

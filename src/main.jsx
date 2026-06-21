@@ -46,6 +46,7 @@ import {
   MessageCircle,
   Music2,
   Package,
+  Pause,
   Plus,
   Phone,
   Play,
@@ -3887,6 +3888,7 @@ function Home({ notify, playRelease }) {
       </section>
       <div className="page">
         <LogoSlider />
+        <CampaignPlacement spot="homepage" title="À découvrir maintenant" />
         {!loading && <ReleaseMarqueeCTA releases={releases} />}
         {!loading && <FocusRail releases={releases} />}
         {!loading && <OfferCarousel releases={releases} />}
@@ -4012,14 +4014,32 @@ function MiniReleaseCard({ release, playRelease }) {
 }
 
 function CampaignSpot({ campaign }) {
+  useEffect(() => {
+    const key = `undiscover_campaign_impression_${campaign.id}`;
+    if (sessionStorage.getItem(key)) return;
+    sessionStorage.setItem(key, "1");
+    request(`/campaigns/${campaign.id}/impression`, { method: "POST" }).catch(() => sessionStorage.removeItem(key));
+  }, [campaign.id]);
   const click = () => request(`/campaigns/${campaign.id}/click`, { method: "POST" }).catch(() => {});
-  const href = campaign.target_type === "release" && campaign.release_id ? `/release/${campaign.release_id}` : campaign.url || "/explore";
+  const href = campaign.release_id ? `/release/${campaign.release_id}` : "/explore";
   return (
     <a className={`campaign-spot spot-${campaign.spot}`} href={href} onClick={click}>
       <span>{campaign.image_url ? <img src={campaign.image_url} alt="" /> : <Sparkles size={18} />}</span>
-      <strong>{campaign.title}<small>{campaign.target_type === "organizer" ? "Organizer placement" : campaign.release_title || "Promoted release"}</small></strong>
+      <strong>{campaign.title}<small>{campaign.release_title || "Promoted release"}</small></strong>
       <em>{money(campaign.daily_budget_cents)}/day</em>
     </a>
+  );
+}
+
+function CampaignPlacement({ spot, title }) {
+  const { data, loading } = useData(`/campaigns?spot=${spot}`, [spot]);
+  const campaigns = data?.campaigns || [];
+  if (loading || !campaigns.length) return null;
+  return (
+    <section className={`campaign-placement-panel placement-${spot}`}>
+      <div><span className="eyebrow">Sponsorisé</span><h2>{title}</h2></div>
+      <div className="campaign-placement-grid">{campaigns.map((campaign) => <CampaignSpot key={campaign.id} campaign={campaign} />)}</div>
+    </section>
   );
 }
 
@@ -4118,6 +4138,7 @@ function Explore({ notify, playRelease, query }) {
           </select>
         </div>
       </div>
+      <CampaignPlacement spot="sidebar" title="Sélection sponsorisée" />
       {loading ? <SkeletonList /> : <ReleaseGrid releases={data?.releases || []} notify={notify} playRelease={playRelease} />}
     </main>
   );
@@ -4145,6 +4166,7 @@ function Charts({ notify, playRelease, query }) {
           {genres.map((item) => <option key={item}>{item}</option>)}
         </select>
       </div>
+      <CampaignPlacement spot="charts" title="Releases en promotion" />
       {loading ? <SkeletonList /> : type === "countries" ? <CountryCharts countries={data.countries || []} /> : <ReleaseRows releases={data.releases || []} notify={notify} playRelease={playRelease} ranked />}
     </main>
   );
@@ -5693,28 +5715,31 @@ function TestimonialEditor({ user, notify }) {
 }
 
 function CampaignManager({ releases, notify }) {
-  const { data, loading } = useData("/me/campaigns", []);
+  const eligibleReleases = releases.filter((release) => release.moderation_status === "published" && release.visibility === "public");
+  const [refreshKey, setRefreshKey] = useState(0);
+  const { data, loading } = useData("/me/campaigns", [refreshKey]);
   const [form, setForm] = useState({
-    target_type: "release",
-    release_id: releases[0]?.id || "",
-    title: releases[0]?.title || "",
-    url: "",
-    image_url: "",
+    release_id: eligibleReleases[0]?.id || "",
+    title: eligibleReleases[0]?.title || "",
+    image_url: eligibleReleases[0]?.cover_url || "",
     spot: "discovery",
     daily_budget_cents: 100,
     days: 3
   });
   const [busy, setBusy] = useState(false);
+  const [actionBusy, setActionBusy] = useState("");
   const [error, setError] = useState("");
   const update = (key, value) => setForm((current) => ({ ...current, [key]: value }));
+  const totalBudget = Number(form.daily_budget_cents) * Number(form.days || 0);
   const submit = async (event) => {
     event.preventDefault();
     setError("");
     setBusy(true);
     try {
-      await request("/me/campaigns", { method: "POST", body: JSON.stringify(form) });
-      notify("Campaign launched.");
-      navigate("/dashboard");
+      const result = await request("/me/campaigns", { method: "POST", body: JSON.stringify(form) });
+      notify("Campagne créée. Finalise le paiement pour l'activer.");
+      if (result.url) window.location.href = result.url;
+      else setRefreshKey((value) => value + 1);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -5722,41 +5747,101 @@ function CampaignManager({ releases, notify }) {
     }
   };
   const campaigns = data?.campaigns || [];
+  const activeCampaigns = campaigns.filter((campaign) => campaign.status === "active");
+  const totalImpressions = campaigns.reduce((sum, campaign) => sum + Number(campaign.impressions || 0), 0);
+  const totalClicks = campaigns.reduce((sum, campaign) => sum + Number(campaign.clicks || 0), 0);
+  const ctr = totalImpressions ? (totalClicks / totalImpressions) * 100 : 0;
+  const runAction = async (campaign, action) => {
+    if (action === "cancel" && !window.confirm("Arrêter définitivement cette campagne ?")) return;
+    setActionBusy(`${campaign.id}:${action}`);
+    try {
+      await request(`/me/campaigns/${campaign.id}`, { method: "PATCH", body: JSON.stringify({ action }) });
+      notify(action === "pause" ? "Campagne mise en pause." : action === "resume" ? "Campagne relancée." : "Campagne arrêtée.");
+      setRefreshKey((value) => value + 1);
+    } catch (err) {
+      notify(err.message);
+    } finally {
+      setActionBusy("");
+    }
+  };
+  const resumeCheckout = async (campaign) => {
+    setActionBusy(`${campaign.id}:checkout`);
+    try {
+      const result = await request(`/me/campaigns/${campaign.id}/checkout`, { method: "POST" });
+      if (result.url) window.location.href = result.url;
+      else {
+        notify("Paiement confirmé, campagne activée.");
+        setRefreshKey((value) => value + 1);
+        setActionBusy("");
+      }
+    } catch (err) {
+      notify(err.message);
+      setActionBusy("");
+    }
+  };
   return (
     <section className="campaign-manager-card">
-      <div className="link-shortener-head">
-        <Sparkles size={22} />
-        <div>
-          <h2>Promote music or organizer</h2>
-          <p>Buy clean discovery placements by day: 1, 3 or 5 EUR/day depending on the spot.</p>
+      <div className="campaign-manager-head">
+        <div className="link-shortener-head">
+          <Sparkles size={22} />
+          <div>
+            <h2>Campagnes de promotion</h2>
+            <p>Propulse une release, suis ses performances et garde le contrôle sur sa diffusion.</p>
+          </div>
         </div>
+        <button className="button ghost" type="button" onClick={() => setRefreshKey((value) => value + 1)}><RefreshCw size={15} /> Actualiser</button>
       </div>
+
+      <div className="campaign-kpis">
+        <div><span>Actives</span><strong>{activeCampaigns.length}</strong></div>
+        <div><span>Impressions</span><strong>{shortNumber(totalImpressions)}</strong></div>
+        <div><span>Clics</span><strong>{shortNumber(totalClicks)}</strong></div>
+        <div><span>CTR global</span><strong>{ctr.toFixed(1)}%</strong></div>
+      </div>
+
+      <div className="campaign-create-panel">
+        <div>
+          <span className="eyebrow">Nouvelle campagne</span>
+          <h3>Choisis la release à mettre en avant</h3>
+          <p>Le budget total est payé une fois. La campagne démarre uniquement après confirmation Stripe.</p>
+        </div>
       <form className="campaign-form" onSubmit={submit}>
-        <label>Target<select value={form.target_type} onChange={(event) => update("target_type", event.target.value)}><option value="release">Release</option><option value="organizer">Organizer</option></select></label>
-        {form.target_type === "release" ? (
-          <label>Release<select value={form.release_id} onChange={(event) => {
-            const next = releases.find((release) => release.id === event.target.value);
-            update("release_id", event.target.value);
-            update("title", next?.title || form.title);
-          }}>{releases.map((release) => <option key={release.id} value={release.id}>{release.title}</option>)}</select></label>
-        ) : (
-          <label>Organizer link<input value={form.url} onChange={(event) => update("url", event.target.value)} placeholder="https://..." /></label>
-        )}
-        <label>Campaign title<input value={form.title} onChange={(event) => update("title", event.target.value)} placeholder="New club night, EP drop..." /></label>
-        <label>Image URL<input value={form.image_url} onChange={(event) => update("image_url", event.target.value)} placeholder="https://..." /></label>
-        <label>Spot<select value={form.spot} onChange={(event) => update("spot", event.target.value)}><option value="discovery">Discovery feed</option><option value="homepage">Homepage hero rail</option><option value="charts">Charts boost</option><option value="sidebar">Sidebar native ad</option></select></label>
-        <label>Budget/day<select value={form.daily_budget_cents} onChange={(event) => update("daily_budget_cents", Number(event.target.value))}><option value={100}>1 EUR/day</option><option value={300}>3 EUR/day</option><option value={500}>5 EUR/day</option></select></label>
-        <label>Days<input type="number" min="1" max="30" value={form.days} onChange={(event) => update("days", event.target.value)} /></label>
+        <label>Release<select value={form.release_id} onChange={(event) => {
+            const next = eligibleReleases.find((release) => release.id === event.target.value);
+            setForm((current) => ({ ...current, release_id: event.target.value, title: next?.title || current.title, image_url: next?.cover_url || "" }));
+          }}><option value="">Sélectionner une release</option>{eligibleReleases.map((release) => <option key={release.id} value={release.id}>{release.title}</option>)}</select>{!eligibleReleases.length && <small>Publie une release publique avant de créer une campagne.</small>}</label>
+        <label>Titre<input value={form.title} maxLength={90} onChange={(event) => update("title", event.target.value)} placeholder="Nom de la campagne" /></label>
+        <label>Placement<select value={form.spot} onChange={(event) => update("spot", event.target.value)}><option value="discovery">Discovery feed</option><option value="homepage">Accueil</option><option value="charts">Classements</option><option value="sidebar">Encart catalogue</option></select></label>
+        <label>Budget quotidien<select value={form.daily_budget_cents} onChange={(event) => update("daily_budget_cents", Number(event.target.value))}><option value={100}>1 EUR / jour</option><option value={300}>3 EUR / jour</option><option value={500}>5 EUR / jour</option></select></label>
+        <label>Durée<input type="number" min="1" max="30" value={form.days} onChange={(event) => update("days", Number(event.target.value))} /><small>De 1 à 30 jours</small></label>
+        <label>Visuel personnalisé <small>(optionnel)</small><input value={form.image_url} onChange={(event) => update("image_url", event.target.value)} placeholder="La cover de la release sera utilisée" /></label>
         {error && <p className="error">{error}</p>}
-        <button className="button accent" type="submit" disabled={busy || (form.target_type === "release" && !releases.length)}>{busy ? <Loader2 className="spin" size={16} /> : <Sparkles size={16} />} Launch campaign</button>
+        <div className="campaign-checkout-summary"><span>Budget total</span><strong>{money(totalBudget)}</strong><small>{form.days || 0} jour{Number(form.days) > 1 ? "s" : ""} à {money(form.daily_budget_cents)}/jour</small></div>
+        <button className="button accent" type="submit" disabled={busy || !form.release_id || !form.title.trim()}>{busy ? <Loader2 className="spin" size={16} /> : <CreditCard size={16} />} Payer et lancer la campagne</button>
       </form>
+      </div>
+
       <div className="campaign-list">
-        {loading ? <p className="muted">Loading campaigns...</p> : campaigns.slice(0, 4).map((campaign) => (
-          <article key={campaign.id}>
-            <strong>{campaign.title}<small>{campaign.spot} - {money(campaign.daily_budget_cents)}/day - {campaign.days} days</small></strong>
-            <span>{campaign.status}</span>
-          </article>
-        ))}
+        <div className="campaign-list-head"><div><span className="eyebrow">Historique</span><h3>Tes campagnes</h3></div><span>{campaigns.length} au total</span></div>
+        {loading ? <p className="muted">Chargement des campagnes...</p> : !campaigns.length ? <div className="campaign-empty"><BarChart3 size={22} /><strong>Aucune campagne</strong><p>Ta première campagne apparaîtra ici avec ses statistiques.</p></div> : campaigns.map((campaign) => {
+          const impressions = Number(campaign.impressions || 0);
+          const clicks = Number(campaign.clicks || 0);
+          const campaignCtr = impressions ? (clicks / impressions) * 100 : 0;
+          const statusLabel = { active: "Active", paused: "En pause", pending: "Paiement requis", completed: "Terminée", cancelled: "Arrêtée" }[campaign.status] || campaign.status;
+          return (
+            <article key={campaign.id} className={`campaign-row status-${campaign.status}`}>
+              <ReleaseThumbnail release={{ cover_url: campaign.image_url || campaign.release_cover_url, title: campaign.release_title, artist: campaign.owner_name }} size={58} />
+              <div className="campaign-row-main"><div><strong>{campaign.title}</strong><span className={`campaign-status status-${campaign.status}`}>{statusLabel}</span></div><small>{campaign.release_title} · {campaign.spot} · {campaign.days} jour{campaign.days > 1 ? "s" : ""}</small></div>
+              <div className="campaign-row-metrics"><span><b>{shortNumber(impressions)}</b> impressions</span><span><b>{shortNumber(clicks)}</b> clics</span><span><b>{campaignCtr.toFixed(1)}%</b> CTR</span><span><b>{money(campaign.daily_budget_cents * campaign.days)}</b> budget</span></div>
+              <div className="campaign-row-actions">
+                {campaign.status === "pending" && <button className="button accent" type="button" disabled={actionBusy === `${campaign.id}:checkout`} onClick={() => resumeCheckout(campaign)}>{actionBusy === `${campaign.id}:checkout` ? <Loader2 className="spin" size={14} /> : <CreditCard size={14} />} Payer</button>}
+                {campaign.status === "active" && <button className="button ghost" type="button" disabled={actionBusy === `${campaign.id}:pause`} onClick={() => runAction(campaign, "pause")}><Pause size={14} /> Pause</button>}
+                {campaign.status === "paused" && <button className="button ghost" type="button" disabled={actionBusy === `${campaign.id}:resume`} onClick={() => runAction(campaign, "resume")}><Play size={14} /> Reprendre</button>}
+                {["pending", "active", "paused"].includes(campaign.status) && <button className="button ghost campaign-stop" type="button" disabled={actionBusy === `${campaign.id}:cancel`} onClick={() => runAction(campaign, "cancel")}><X size={14} /> Arrêter</button>}
+              </div>
+            </article>
+          );
+        })}
       </div>
     </section>
   );

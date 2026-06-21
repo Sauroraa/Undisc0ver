@@ -54,7 +54,12 @@ function isValidEmail(email) {
   return typeof email === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email) && email.length <= 254;
 }
 
-app.use(express.json({ limit: "1mb" }));
+app.use(express.json({
+  limit: "1mb",
+  verify: (req, _res, buffer) => {
+    if (req.originalUrl === "/api/webhooks/stripe") req.rawBody = buffer;
+  }
+}));
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const distDir = join(resolve(__dirname, ".."), "dist");
@@ -409,7 +414,7 @@ function publicReleaseWhere(prefix = "r") {
 }
 
 function activeCampaignWhere(prefix = "pc") {
-  return `${prefix}.status = 'active' AND datetime(${prefix}.ends_at) >= datetime('now')`;
+  return `${prefix}.target_type = 'release' AND ${prefix}.status = 'active' AND datetime(${prefix}.ends_at) >= datetime('now')`;
 }
 
 function campaignSelect(where = "", order = "pc.created_at DESC") {
@@ -849,7 +854,7 @@ app.get("/api/discover", (req, res) => {
   `).all();
 
   const boosted = db.prepare(campaignSelect(
-    `WHERE ${activeCampaignWhere("pc")}`,
+    `WHERE ${activeCampaignWhere("pc")} AND pc.spot = 'discovery'`,
     "pc.daily_budget_cents DESC, pc.created_at DESC"
   )).all().slice(0, 8);
 
@@ -1169,34 +1174,100 @@ app.get("/r/:code", (req, res) => {
 });
 
 app.get("/api/me/campaigns", auth, (req, res) => {
+  db.prepare("UPDATE promotion_campaigns SET status = 'completed' WHERE user_id = ? AND status = 'active' AND datetime(ends_at) < datetime('now')").run(req.user.id);
   const campaigns = db.prepare(campaignSelect("WHERE pc.user_id = ?", "pc.created_at DESC")).all(req.user.id);
   res.json({ campaigns });
 });
 
-app.post("/api/me/campaigns", auth, (req, res) => {
-  const targetType = String(req.body.target_type || "release").toLowerCase();
+app.get("/api/campaigns", (req, res) => {
+  const spot = String(req.query.spot || "").toLowerCase();
+  if (!["homepage", "charts", "sidebar"].includes(spot)) return res.status(400).json({ error: "Placement invalide." });
+  const campaigns = db.prepare(campaignSelect(
+    `WHERE ${activeCampaignWhere("pc")} AND pc.spot = ?`,
+    "pc.daily_budget_cents DESC, pc.created_at DESC"
+  )).all(spot).slice(0, 4);
+  res.json({ campaigns });
+});
+
+async function createCampaignCheckout(campaign) {
+  const previousCheckout = db.prepare("SELECT * FROM stripe_checkouts WHERE campaign_id = ? AND status = 'pending' ORDER BY created_at DESC LIMIT 1").get(campaign.id);
+  if (previousCheckout) {
+    try {
+      const previousSession = await stripe.checkout.sessions.retrieve(previousCheckout.stripe_session_id);
+      if (previousSession.payment_status === "paid") {
+        fulfillStripeCheckout(previousSession);
+        return previousSession;
+      }
+      if (previousSession.status === "open" && previousSession.url) return previousSession;
+    } catch {
+      db.prepare("UPDATE stripe_checkouts SET status = 'failed' WHERE id = ?").run(previousCheckout.id);
+    }
+  }
+  const totalBudget = Number(campaign.daily_budget_cents) * Number(campaign.days);
+  const session = await stripe.checkout.sessions.create({
+    mode: "payment",
+    success_url: `${siteUrl}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
+    cancel_url: `${siteUrl}/dashboard`,
+    line_items: [{ price_data: { currency: "eur", unit_amount: totalBudget, product_data: { name: `Campagne: ${campaign.title}`, description: `${campaign.release_title} - ${campaign.days} jour${campaign.days > 1 ? "s" : ""} - ${campaign.spot}` } }, quantity: 1 }],
+    metadata: { user_id: campaign.user_id, campaign_id: campaign.id, type: "campaign" }
+  });
+  db.prepare("INSERT INTO stripe_checkouts (id, user_id, campaign_id, stripe_session_id, amount_cents, status) VALUES (?, ?, ?, ?, ?, 'pending')")
+    .run(id("chk"), campaign.user_id, campaign.id, session.id, totalBudget);
+  return session;
+}
+
+app.post("/api/me/campaigns", auth, async (req, res) => {
+  if (!stripe) return res.status(503).json({ error: "Le paiement Stripe doit être configuré avant de lancer une campagne." });
   const spot = String(req.body.spot || "discovery").toLowerCase();
   const dailyBudget = Number(req.body.daily_budget_cents || 100);
   const days = Math.max(1, Math.min(30, Number(req.body.days || 1)));
-  if (!["release", "organizer"].includes(targetType)) return res.status(400).json({ error: "Type de campagne invalide." });
   if (!["discovery", "homepage", "charts", "sidebar"].includes(spot)) return res.status(400).json({ error: "Spot publicitaire invalide." });
   if (![100, 300, 500].includes(dailyBudget)) return res.status(400).json({ error: "Budget invalide. Choisis 1, 3 ou 5 EUR/jour." });
-  const releaseId = targetType === "release" ? String(req.body.release_id || "").trim() : "";
-  if (targetType === "release") {
-    const release = db.prepare("SELECT id FROM releases WHERE id = ? AND user_id = ? AND moderation_status != 'removed'").get(releaseId, req.user.id);
-    if (!release) return res.status(400).json({ error: "Release invalide pour cette campagne." });
-  }
+  const releaseId = String(req.body.release_id || "").trim();
+  const release = db.prepare("SELECT id, title, cover_url FROM releases WHERE id = ? AND user_id = ? AND moderation_status = 'published' AND visibility = 'public'").get(releaseId, req.user.id);
+  if (!release) return res.status(400).json({ error: "Choisis une release publique et publiée." });
   const title = String(req.body.title || "").trim().slice(0, 90);
-  const url = String(req.body.url || "").trim().slice(0, 240);
   const imageUrl = String(req.body.image_url || "").trim().slice(0, 240);
   if (!title) return res.status(400).json({ error: "Titre de campagne requis." });
-  if (targetType === "organizer" && !url) return res.status(400).json({ error: "Lien organisateur requis." });
   const campaignId = id("cmp");
   db.prepare(`
-    INSERT INTO promotion_campaigns (id, user_id, target_type, release_id, title, url, image_url, spot, daily_budget_cents, days, ends_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', ?))
-  `).run(campaignId, req.user.id, targetType, releaseId || null, title, url, imageUrl, spot, dailyBudget, days, `+${days} days`);
-  res.json({ campaign: db.prepare(campaignSelect("WHERE pc.id = ?")).get(campaignId) });
+    INSERT INTO promotion_campaigns (id, user_id, target_type, release_id, title, image_url, spot, daily_budget_cents, days, status, ends_at)
+    VALUES (?, ?, 'release', ?, ?, ?, ?, ?, ?, 'pending', datetime('now', ?))
+  `).run(campaignId, req.user.id, releaseId, title, imageUrl || release.cover_url || "", spot, dailyBudget, days, `+${days} days`);
+  const campaign = db.prepare(campaignSelect("WHERE pc.id = ?")).get(campaignId);
+  const session = await createCampaignCheckout(campaign);
+  res.json({ campaign, url: session.url });
+});
+
+app.post("/api/me/campaigns/:id/checkout", auth, async (req, res) => {
+  if (!stripe) return res.status(503).json({ error: "Le paiement Stripe doit être configuré avant de lancer une campagne." });
+  const campaign = db.prepare(campaignSelect("WHERE pc.id = ? AND pc.user_id = ? AND pc.status = 'pending'")).get(req.params.id, req.user.id);
+  if (!campaign) return res.status(404).json({ error: "Campagne en attente introuvable." });
+  const session = await createCampaignCheckout(campaign);
+  res.json({ url: session.url });
+});
+
+app.patch("/api/me/campaigns/:id", auth, (req, res) => {
+  const campaign = db.prepare("SELECT * FROM promotion_campaigns WHERE id = ? AND user_id = ?").get(req.params.id, req.user.id);
+  if (!campaign) return res.status(404).json({ error: "Campagne introuvable." });
+  const action = String(req.body.action || "").toLowerCase();
+  if (action === "pause" && campaign.status === "active") {
+    db.prepare("UPDATE promotion_campaigns SET status = 'paused', paused_at = CURRENT_TIMESTAMP WHERE id = ?").run(campaign.id);
+  } else if (action === "resume" && campaign.status === "paused") {
+    db.prepare("UPDATE promotion_campaigns SET status = 'active', ends_at = datetime(ends_at, '+' || MAX(0, CAST(strftime('%s', 'now') - strftime('%s', paused_at) AS INTEGER)) || ' seconds'), paused_at = NULL WHERE id = ?").run(campaign.id);
+  } else if (action === "cancel" && ["pending", "active", "paused"].includes(campaign.status)) {
+    db.prepare("UPDATE promotion_campaigns SET status = 'cancelled' WHERE id = ?").run(campaign.id);
+  } else {
+    return res.status(400).json({ error: "Cette action n'est pas disponible pour la campagne." });
+  }
+  res.json({ campaign: db.prepare(campaignSelect("WHERE pc.id = ?")).get(campaign.id) });
+});
+
+app.post("/api/campaigns/:id/impression", (req, res) => {
+  const campaign = db.prepare(`SELECT id FROM promotion_campaigns pc WHERE pc.id = ? AND ${activeCampaignWhere("pc")}`).get(req.params.id);
+  if (!campaign) return res.status(404).json({ error: "Campagne introuvable." });
+  db.prepare("UPDATE promotion_campaigns SET impressions = impressions + 1 WHERE id = ?").run(campaign.id);
+  res.json({ ok: true });
 });
 
 app.post("/api/campaigns/:id/click", (req, res) => {
@@ -1436,6 +1507,27 @@ app.post("/api/auth/reset-password", rateLimiter(10, 60 * 60_000), (req, res) =>
 });
 
 // ── Stripe checkout ──────────────────────────────────────────────────────────
+function fulfillStripeCheckout(session) {
+  const meta = session.metadata || {};
+  const chk = db.prepare("SELECT * FROM stripe_checkouts WHERE stripe_session_id = ?").get(session.id);
+  if (chk?.status === "pending") {
+    db.prepare("UPDATE stripe_checkouts SET status = 'paid' WHERE id = ?").run(chk.id);
+    if (chk.release_id) {
+      const release = db.prepare("SELECT price_cents FROM releases WHERE id = ?").get(chk.release_id);
+      const amount = release?.price_cents || chk.amount_cents;
+      db.prepare("INSERT OR IGNORE INTO purchases (id, user_id, release_id, amount_cents) VALUES (?, ?, ?, ?)").run(id("pur"), chk.user_id, chk.release_id, amount);
+      db.prepare("UPDATE releases SET sales = sales + 1, revenue_cents = revenue_cents + ? WHERE id = ?").run(amount, chk.release_id);
+    }
+    if (chk.campaign_id) {
+      db.prepare("UPDATE promotion_campaigns SET status = 'active', starts_at = CURRENT_TIMESTAMP, ends_at = datetime('now', '+' || days || ' days') WHERE id = ? AND status = 'pending'").run(chk.campaign_id);
+    }
+  }
+  if (meta.type === "subscription" && meta.plan && meta.user_id) {
+    db.prepare("UPDATE users SET plan = ?, pro = 1 WHERE id = ?").run(meta.plan, meta.user_id);
+  }
+  return meta.type || "purchase";
+}
+
 app.post("/api/checkout/create-session", auth, async (req, res) => {
   if (!stripe) return res.status(503).json({ error: "Le paiement en ligne n'est pas encore activé. Contacte le support." });
   const releaseId = String(req.body.release_id || "").trim();
@@ -1473,47 +1565,22 @@ app.get("/api/checkout/success", auth, (req, res) => {
   if (!stripe || !sessionId) return res.json({ ok: true, message: "Achat enregistré." });
   stripe.checkout.sessions.retrieve(sessionId).then((session) => {
     if (session.payment_status !== "paid" && session.status !== "active") return res.json({ ok: false });
-    const chk = db.prepare("SELECT * FROM stripe_checkouts WHERE stripe_session_id = ?").get(sessionId);
-    if (chk && chk.status === "pending") {
-      db.prepare("UPDATE stripe_checkouts SET status = 'paid' WHERE id = ?").run(chk.id);
-      if (chk.release_id) {
-        const release = db.prepare("SELECT price_cents FROM releases WHERE id = ?").get(chk.release_id);
-        db.prepare("INSERT OR IGNORE INTO purchases (id, user_id, release_id, amount_cents) VALUES (?, ?, ?, ?)").run(id("pur"), chk.user_id, chk.release_id, release?.price_cents || chk.amount_cents);
-        db.prepare("UPDATE releases SET sales = sales + 1, revenue_cents = revenue_cents + ? WHERE id = ?").run(release?.price_cents || chk.amount_cents, chk.release_id);
-      }
-      const meta = session.metadata || {};
-      if (meta.type === "subscription" && meta.plan) {
-        db.prepare("UPDATE users SET plan = ?, pro = 1 WHERE id = ?").run(meta.plan, chk.user_id);
-      }
-    }
-    res.json({ ok: true, type: session.metadata?.type || "purchase" });
+    res.json({ ok: true, type: fulfillStripeCheckout(session) });
   }).catch(() => res.json({ ok: false }));
 });
 
 // Stripe webhook (for production reliability)
-app.post("/api/webhooks/stripe", express.raw({ type: "application/json" }), (req, res) => {
+app.post("/api/webhooks/stripe", (req, res) => {
   if (!stripe || !process.env.STRIPE_WEBHOOK_SECRET) return res.json({ received: true });
   let event;
   try {
-    event = stripe.webhooks.constructEvent(req.body, req.headers["stripe-signature"], process.env.STRIPE_WEBHOOK_SECRET);
+    event = stripe.webhooks.constructEvent(req.rawBody, req.headers["stripe-signature"], process.env.STRIPE_WEBHOOK_SECRET);
   } catch {
     return res.status(400).send("Webhook signature invalid.");
   }
   if (event.type === "checkout.session.completed") {
     const session = event.data.object;
-    const chk = db.prepare("SELECT * FROM stripe_checkouts WHERE stripe_session_id = ?").get(session.id);
-    if (chk && chk.status === "pending") {
-      db.prepare("UPDATE stripe_checkouts SET status = 'paid' WHERE id = ?").run(chk.id);
-      if (chk.release_id) {
-        const release = db.prepare("SELECT price_cents FROM releases WHERE id = ?").get(chk.release_id);
-        db.prepare("INSERT OR IGNORE INTO purchases (id, user_id, release_id, amount_cents) VALUES (?, ?, ?, ?)").run(id("pur"), chk.user_id, chk.release_id, release?.price_cents || chk.amount_cents);
-        db.prepare("UPDATE releases SET sales = sales + 1, revenue_cents = revenue_cents + ? WHERE id = ?").run(release?.price_cents || 0, chk.release_id);
-      }
-      const meta = session.metadata || {};
-      if (meta.type === "subscription" && meta.plan) {
-        db.prepare("UPDATE users SET plan = ?, pro = 1 WHERE id = ?").run(meta.plan, chk.user_id);
-      }
-    }
+    if (session.payment_status === "paid" || session.status === "active") fulfillStripeCheckout(session);
   }
   res.json({ received: true });
 });

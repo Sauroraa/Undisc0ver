@@ -259,30 +259,6 @@ export function initDb() {
     );
   `);
 
-  db.exec(`
-    CREATE INDEX IF NOT EXISTS idx_releases_moderation_visibility ON releases (moderation_status, visibility);
-    CREATE INDEX IF NOT EXISTS idx_releases_user_id ON releases (user_id);
-    CREATE INDEX IF NOT EXISTS idx_releases_genre ON releases (genre);
-    CREATE INDEX IF NOT EXISTS idx_releases_plays ON releases (plays DESC);
-    CREATE INDEX IF NOT EXISTS idx_releases_created_at ON releases (created_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions (user_id);
-    CREATE INDEX IF NOT EXISTS idx_follows_artist_id ON follows (artist_id);
-    CREATE INDEX IF NOT EXISTS idx_follows_follower_id ON follows (follower_id);
-    CREATE INDEX IF NOT EXISTS idx_likes_release_id ON likes (release_id);
-    CREATE INDEX IF NOT EXISTS idx_release_listens_user_id ON release_listens (user_id);
-    CREATE INDEX IF NOT EXISTS idx_release_listens_release_id ON release_listens (release_id);
-    CREATE INDEX IF NOT EXISTS idx_release_comments_release_id ON release_comments (release_id);
-    CREATE INDEX IF NOT EXISTS idx_promotion_campaigns_status ON promotion_campaigns (status, ends_at);
-    CREATE INDEX IF NOT EXISTS idx_users_artist_slug ON users (artist_slug);
-    CREATE INDEX IF NOT EXISTS idx_users_google_id ON users (google_id);
-    CREATE INDEX IF NOT EXISTS idx_playlists_user_id ON playlists (user_id);
-    CREATE INDEX IF NOT EXISTS idx_playlist_tracks_playlist ON playlist_tracks (playlist_id, position);
-    CREATE INDEX IF NOT EXISTS idx_reposts_release_id ON reposts (release_id);
-    CREATE INDEX IF NOT EXISTS idx_reposts_user_id ON reposts (user_id);
-    CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications (user_id, read, created_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_password_resets_user_id ON password_resets (user_id);
-  `);
-
   const userColumns = db.prepare("PRAGMA table_info(users)").all().map((column) => column.name);
   const addUserColumn = (name, definition) => {
     if (!userColumns.includes(name)) db.exec(`ALTER TABLE users ADD COLUMN ${name} ${definition}`);
@@ -323,6 +299,40 @@ export function initDb() {
   addReleaseColumn("cover_url", "TEXT NOT NULL DEFAULT ''");
   addReleaseColumn("featured_artist", "TEXT NOT NULL DEFAULT ''");
   addReleaseColumn("visibility", "TEXT NOT NULL DEFAULT 'public'");
+
+  const checkoutColumns = db.prepare("PRAGMA table_info(stripe_checkouts)").all().map((column) => column.name);
+  if (!checkoutColumns.includes("campaign_id")) db.exec("ALTER TABLE stripe_checkouts ADD COLUMN campaign_id TEXT REFERENCES promotion_campaigns(id) ON DELETE SET NULL");
+
+  const campaignColumns = db.prepare("PRAGMA table_info(promotion_campaigns)").all().map((column) => column.name);
+  if (!campaignColumns.includes("paused_at")) db.exec("ALTER TABLE promotion_campaigns ADD COLUMN paused_at TEXT");
+
+  // Organizer placements are no longer offered; keep their history without serving them.
+  db.prepare("UPDATE promotion_campaigns SET status = 'cancelled' WHERE target_type = 'organizer' AND status IN ('active', 'pending', 'paused')").run();
+
+  // Columns must exist before indexes referencing migrated fields are created.
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_releases_moderation_visibility ON releases (moderation_status, visibility);
+    CREATE INDEX IF NOT EXISTS idx_releases_user_id ON releases (user_id);
+    CREATE INDEX IF NOT EXISTS idx_releases_genre ON releases (genre);
+    CREATE INDEX IF NOT EXISTS idx_releases_plays ON releases (plays DESC);
+    CREATE INDEX IF NOT EXISTS idx_releases_created_at ON releases (created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions (user_id);
+    CREATE INDEX IF NOT EXISTS idx_follows_artist_id ON follows (artist_id);
+    CREATE INDEX IF NOT EXISTS idx_follows_follower_id ON follows (follower_id);
+    CREATE INDEX IF NOT EXISTS idx_likes_release_id ON likes (release_id);
+    CREATE INDEX IF NOT EXISTS idx_release_listens_user_id ON release_listens (user_id);
+    CREATE INDEX IF NOT EXISTS idx_release_listens_release_id ON release_listens (release_id);
+    CREATE INDEX IF NOT EXISTS idx_release_comments_release_id ON release_comments (release_id);
+    CREATE INDEX IF NOT EXISTS idx_promotion_campaigns_status ON promotion_campaigns (status, ends_at);
+    CREATE INDEX IF NOT EXISTS idx_users_artist_slug ON users (artist_slug);
+    CREATE INDEX IF NOT EXISTS idx_users_google_id ON users (google_id);
+    CREATE INDEX IF NOT EXISTS idx_playlists_user_id ON playlists (user_id);
+    CREATE INDEX IF NOT EXISTS idx_playlist_tracks_playlist ON playlist_tracks (playlist_id, position);
+    CREATE INDEX IF NOT EXISTS idx_reposts_release_id ON reposts (release_id);
+    CREATE INDEX IF NOT EXISTS idx_reposts_user_id ON reposts (user_id);
+    CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications (user_id, read, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_password_resets_user_id ON password_resets (user_id);
+  `);
 
   const isProduction = process.env.NODE_ENV === "production";
   const seedDemoData = envFlag("SEED_DEMO_DATA", !isProduction);
