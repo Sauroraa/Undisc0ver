@@ -1617,7 +1617,11 @@ app.get("/api/genre/:genre/releases", (req, res) => {
 // ── Playlists ────────────────────────────────────────────────────────────────
 app.get("/api/playlists", auth, (req, res) => {
   const playlists = db.prepare(`
-    SELECT p.*, COUNT(pt.release_id) track_count, u.name owner_name, u.avatar, u.artist_slug
+    SELECT p.*, COUNT(pt.release_id) track_count, u.name owner_name, u.avatar, u.avatar_url, u.artist_slug,
+      (SELECT GROUP_CONCAT(cover_url, '|') FROM (
+        SELECT r2.cover_url cover_url FROM playlist_tracks pt2 JOIN releases r2 ON r2.id = pt2.release_id
+        WHERE pt2.playlist_id = p.id AND r2.cover_url != '' ORDER BY pt2.position ASC LIMIT 4
+      )) cover_urls
     FROM playlists p
     JOIN users u ON u.id = p.user_id
     LEFT JOIN playlist_tracks pt ON pt.playlist_id = p.id
@@ -1630,7 +1634,11 @@ app.get("/api/playlists", auth, (req, res) => {
 app.get("/api/playlists/public", (req, res) => {
   const q = `%${req.query.q || ""}%`;
   const playlists = db.prepare(`
-    SELECT p.*, COUNT(pt.release_id) track_count, u.name owner_name, u.avatar, u.avatar_url, u.artist_slug
+    SELECT p.*, COUNT(pt.release_id) track_count, u.name owner_name, u.avatar, u.avatar_url, u.artist_slug,
+      (SELECT GROUP_CONCAT(cover_url, '|') FROM (
+        SELECT r2.cover_url cover_url FROM playlist_tracks pt2 JOIN releases r2 ON r2.id = pt2.release_id
+        WHERE pt2.playlist_id = p.id AND r2.cover_url != '' ORDER BY pt2.position ASC LIMIT 4
+      )) cover_urls
     FROM playlists p
     JOIN users u ON u.id = p.user_id
     LEFT JOIN playlist_tracks pt ON pt.playlist_id = p.id
@@ -1652,10 +1660,12 @@ app.post("/api/playlists", auth, (req, res) => {
 });
 
 app.get("/api/playlists/:id", (req, res) => {
+  const viewerId = optionalUserId(req);
   const playlist = db.prepare(`
     SELECT p.*, u.name owner_name, u.avatar, u.avatar_url, u.artist_slug
-    FROM playlists p JOIN users u ON u.id = p.user_id WHERE p.id = ?
-  `).get(req.params.id);
+    FROM playlists p JOIN users u ON u.id = p.user_id
+    WHERE p.id = ? AND (p.visibility = 'public' OR p.user_id = ?)
+  `).get(req.params.id, viewerId);
   if (!playlist) return res.status(404).json({ error: "Playlist introuvable." });
   const tracks = db.prepare(`
     ${releaseSelect("JOIN playlist_tracks pt ON pt.release_id = r.id WHERE pt.playlist_id = ?", "pt.position ASC, pt.added_at ASC")}

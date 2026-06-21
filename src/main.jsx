@@ -2589,84 +2589,85 @@ function FeedReleaseCard({ release, notify, playRelease }) {
 }
 
 function PlaylistsPage({ notify, playRelease }) {
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const { data, loading, error } = useData("/playlists/public", []);
   const [myPlaylists, setMyPlaylists] = useState([]);
   const [creating, setCreating] = useState(false);
+  const [busy, setBusy] = useState(false);
   const [form, setForm] = useState({ title: "", description: "", visibility: "public" });
   const [activePlaylist, setActivePlaylist] = useState(null);
-  const { data: playlistDetail, loading: detailLoading } = useData(activePlaylist ? `/playlists/${activePlaylist}` : null, [activePlaylist]);
+  const { data: detail, loading: detailLoading, error: detailError } = useData(activePlaylist ? `/playlists/${activePlaylist}` : null, [activePlaylist]);
 
   useEffect(() => {
     if (!user) return;
     request("/playlists").then((res) => setMyPlaylists(res.playlists || [])).catch(() => {});
   }, [user?.id]);
 
-  const createPlaylist = async (e) => {
-    e.preventDefault();
+  const createPlaylist = async (event) => {
+    event.preventDefault();
+    setBusy(true);
     try {
       const res = await request("/playlists", { method: "POST", body: JSON.stringify(form) });
-      setMyPlaylists((prev) => [res.playlist, ...prev]);
+      setMyPlaylists((current) => [{ ...res.playlist, owner_name: user.name, avatar: user.avatar, avatar_url: user.avatar_url, track_count: 0 }, ...current]);
       setCreating(false);
       setForm({ title: "", description: "", visibility: "public" });
       notify("Playlist créée.");
     } catch (err) { notify(err.message); }
+    finally { setBusy(false); }
   };
 
-  if (activePlaylist && playlistDetail) {
+  if (activePlaylist) {
+    const playlist = detail?.playlist;
+    const tracks = detail?.tracks || [];
     return (
-      <main className="page">
-        <button className="button ghost" onClick={() => setActivePlaylist(null)}><ArrowLeft size={16} /> Retour</button>
-        <PageHeader eyebrow="Playlist" title={playlistDetail.playlist?.title} text={playlistDetail.playlist?.description} />
-        {detailLoading ? <SkeletonList /> : <ReleaseRows releases={playlistDetail.tracks || []} notify={notify} playRelease={playRelease} />}
+      <main className="page playlist-page">
+        <button className="button ghost playlist-back" onClick={() => setActivePlaylist(null)}><ArrowLeft size={16} /> Toutes les playlists</button>
+        {detailLoading ? <SkeletonList /> : detailError ? <ErrorPage message={detailError} /> : playlist && (
+          <>
+            <section className="playlist-detail-hero">
+              <PlaylistArtwork playlist={playlist} tracks={tracks} />
+              <div><span className="eyebrow">Playlist {playlist.visibility === "private" ? "privée" : "publique"}</span><h1>{playlist.title}</h1><p>{playlist.description || "Une sélection construite sur Undiscover."}</p><span className="playlist-owner"><AvatarImg src={playlist.avatar_url} fallback={playlist.avatar || playlist.owner_name?.[0]} size={30} /> Par <b>{playlist.owner_name}</b> · {tracks.length} titre{tracks.length !== 1 ? "s" : ""}</span>{tracks.length > 0 && <button className="button accent" onClick={() => playRelease(tracks[0])}><Play size={16} fill="currentColor" /> Tout écouter</button>}</div>
+            </section>
+            <section className="playlist-track-section"><div className="playlist-section-head"><div><span className="eyebrow">Tracklist</span><h2>{tracks.length ? "Dans cette playlist" : "Playlist vide"}</h2></div></div>{tracks.length ? <div className="playlist-track-list">{tracks.map((release, index) => <PlaylistTrack key={release.id} release={release} index={index} notify={notify} playRelease={playRelease} />)}</div> : <PlaylistEmpty compact />}</section>
+          </>
+        )}
       </main>
     );
   }
 
+  const publicPlaylists = data?.playlists || [];
   return (
-    <main className="page">
-      <PageHeader eyebrow="Playlists" title="Crates et collections." text="Playlists publiques créées par la communauté Undisc0ver." />
-      {user && (
-        <div className="playlist-actions">
-          {creating ? (
-            <form className="playlist-create-form" onSubmit={createPlaylist}>
-              <label>Titre<input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="Nom de ta playlist" required /></label>
-              <label>Description<input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="Optionnel" /></label>
-              <label>Visibilité<select value={form.visibility} onChange={(e) => setForm({ ...form, visibility: e.target.value })}><option value="public">Publique</option><option value="private">Privée</option></select></label>
-              <div className="button-row"><button className="button accent" type="submit"><Plus size={16} /> Créer</button><button className="button ghost" type="button" onClick={() => setCreating(false)}>Annuler</button></div>
-            </form>
-          ) : (
-            <button className="button accent" onClick={() => setCreating(true)}><Plus size={16} /> Nouvelle playlist</button>
-          )}
-          {myPlaylists.length > 0 && (
-            <section className="section">
-              <h2 className="label">Mes playlists</h2>
-              <div className="playlist-grid">
-                {myPlaylists.map((pl) => (
-                  <article key={pl.id} className="playlist-card" onClick={() => setActivePlaylist(pl.id)}>
-                    <strong>{pl.title}</strong>
-                    <span>{pl.track_count || 0} sons · {pl.visibility}</span>
-                  </article>
-                ))}
-              </div>
-            </section>
-          )}
-        </div>
-      )}
-      {loading ? <SkeletonList /> : error ? <ErrorPage message={error} /> : (
-        <div className="playlist-grid">
-          {(data?.playlists || []).map((pl) => (
-            <article key={pl.id} className="playlist-card" onClick={() => setActivePlaylist(pl.id)}>
-              <strong>{pl.title}</strong>
-              <span>{pl.owner_name} · {pl.track_count || 0} sons</span>
-              {pl.description && <small>{pl.description}</small>}
-            </article>
-          ))}
-          {!data?.playlists?.length && <EmptyCatalogState title="Aucune playlist publique" text="Sois le premier à créer une playlist." />}
-        </div>
-      )}
+    <main className="page playlist-page">
+      <section className="playlist-hero"><div><span className="eyebrow">Bibliothèque communautaire</span><h1>Crates, sélections<br />et <em>obsessions.</em></h1><p>Construis tes collections et découvre les playlists préparées par la communauté Undiscover.</p></div>{authLoading ? null : user ? <button className="button accent" onClick={() => setCreating((value) => !value)}>{creating ? <X size={16} /> : <Plus size={16} />}{creating ? "Fermer" : "Créer une playlist"}</button> : <a className="button accent" href="/login"><Plus size={16} /> Créer une playlist</a>}</section>
+
+      {creating && user && <form className="playlist-create-form" onSubmit={createPlaylist}><div><span className="eyebrow">Nouvelle collection</span><h2>Donne une identité à ta playlist.</h2><p>Ajoute ensuite des releases depuis leur page.</p></div><div className="playlist-create-fields"><label>Titre<input value={form.title} maxLength={120} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="Warehouse closing tools" required /></label><label>Description<textarea value={form.description} maxLength={500} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="Décris l'ambiance" rows={3} /></label><label>Visibilité<select value={form.visibility} onChange={(e) => setForm({ ...form, visibility: e.target.value })}><option value="public">Publique</option><option value="private">Privée</option></select></label><button className="button accent" type="submit" disabled={busy || !form.title.trim()}>{busy ? <Loader2 className="spin" size={16} /> : <Plus size={16} />} Créer</button></div></form>}
+
+      {user && myPlaylists.length > 0 && <PlaylistSection eyebrow="Privé et public" title="Mes playlists" playlists={myPlaylists} owned onOpen={setActivePlaylist} />}
+      <section className="playlist-library-section"><div className="playlist-section-head"><div><span className="eyebrow">À écouter</span><h2>Playlists publiques</h2></div><span>{publicPlaylists.length} sélection{publicPlaylists.length !== 1 ? "s" : ""}</span></div>{loading ? <SkeletonList /> : error ? <ErrorPage message={error} /> : publicPlaylists.length ? <div className="playlist-grid">{publicPlaylists.map((playlist) => <PlaylistCard key={playlist.id} playlist={playlist} onOpen={setActivePlaylist} />)}</div> : <PlaylistEmpty />}</section>
     </main>
   );
+}
+
+function PlaylistSection({ eyebrow, title, playlists, owned, onOpen }) {
+  return <section className="playlist-library-section"><div className="playlist-section-head"><div><span className="eyebrow">{eyebrow}</span><h2>{title}</h2></div><span>{playlists.length} collection{playlists.length !== 1 ? "s" : ""}</span></div><div className="playlist-grid">{playlists.map((playlist) => <PlaylistCard key={playlist.id} playlist={playlist} owned={owned} onOpen={onOpen} />)}</div></section>;
+}
+
+function PlaylistArtwork({ playlist, tracks = [] }) {
+  const source = playlist.cover_urls || playlist.cover_url || tracks.map((track) => track.cover_url).filter(Boolean).join("|");
+  const covers = String(source || "").split("|").filter(Boolean).slice(0, 4);
+  return <span className={`playlist-artwork covers-${covers.length}`}>{covers.length ? covers.map((cover, index) => <img key={`${cover}-${index}`} src={cover} alt="" />) : <span><Music2 size={30} /><small>UND</small></span>}</span>;
+}
+
+function PlaylistCard({ playlist, owned, onOpen }) {
+  return <button className="playlist-card" type="button" onClick={() => onOpen(playlist.id)}><PlaylistArtwork playlist={playlist} /><span className="playlist-card-copy"><span className="playlist-card-badges"><em>{owned ? "À moi" : "Public"}</em>{playlist.visibility === "private" && <em className="private">Privée</em>}</span><strong>{playlist.title}</strong><small>{playlist.description || "Une sélection Undiscover prête à écouter."}</small></span><span className="playlist-card-footer"><span><AvatarImg src={playlist.avatar_url} fallback={playlist.avatar || playlist.owner_name?.[0]} size={24} /> {playlist.owner_name || "Moi"}</span><b>{playlist.track_count || 0} titre{Number(playlist.track_count) !== 1 ? "s" : ""} <ArrowRight size={13} /></b></span></button>;
+}
+
+function PlaylistTrack({ release, index, notify, playRelease }) {
+  return <article className="playlist-track"><span>{String(index + 1).padStart(2, "0")}</span><button className="playlist-track-play" onClick={() => playRelease(release)}><Play size={14} fill="currentColor" /></button><ReleaseThumbnail release={release} size={46} /><a href={`/release/${release.id}`}><strong>{release.title}</strong><small>{release.artist} · {release.genre}</small></a><time>{release.duration}</time><span className={release.free ? "price free" : "price"}>{releasePrice(release)}</span><LikeButton release={release} notify={notify} /></article>;
+}
+
+function PlaylistEmpty({ compact = false }) {
+  return <div className={`playlist-empty${compact ? " compact" : ""}`}><Music2 size={25} /><h2>{compact ? "Aucun morceau pour le moment" : "La bibliothèque démarre ici"}</h2><p>{compact ? "Ajoute des releases depuis leur page avec le bouton Playlist." : "Crée la première playlist publique ou explore le catalogue pour préparer ta sélection."}</p><a className="button accent" href="/explore">Explorer les releases</a></div>;
 }
 
 function GenrePage({ genre, notify, playRelease }) {
