@@ -1864,7 +1864,7 @@ function AdminSettings({ notify }) {
 // LABEL DASHBOARD
 // ═══════════════════════════════════════════════════════════════════════════════
 
-export function LabelDashboard({ notify }) {
+export function LabelDashboard({ notify, embedded = false }) {
   const { user } = window.__undiscover_auth_ctx || {};
   const [section, setSection] = useState("overview");
   const [refreshKey, setRefreshKey] = useState(0);
@@ -1885,6 +1885,31 @@ export function LabelDashboard({ notify }) {
     ["campaigns", "Campagnes",       Zap],
   ];
 
+  const content = loading ? <div className="db-loading"><Loader2 className="spin" size={28} /></div> :
+    error ? <AlertCard type="error" title="Erreur" text={error} /> : (
+      <>
+        {section === "overview"  && <LabelOverview data={data} />}
+        {section === "branding"  && <LabelBranding profile={data.profile} notify={notify} onRefresh={refresh} />}
+        {section === "roster"    && <LabelRoster roster={data.roster} notify={notify} onRefresh={refresh} />}
+        {section === "catalog"   && <LabelCatalog catalog={data.catalog} notify={notify} onRefresh={refresh} />}
+        {section === "analytics" && <LabelAnalytics stats={data.stats} series={data.series} roster={data.roster} catalog={data.catalog} />}
+        {section === "campaigns" && <LabelCampaigns campaigns={data.campaigns} />}
+      </>
+    );
+
+  if (embedded) return (
+    <section className="embedded-label-workspace">
+      <header className="embedded-label-head">
+        <div><p className="label">Espace Label</p><h2>{data?.profile?.name || "Mon label"}</h2><span>Gère ton identité, ton roster et tes performances depuis le dashboard artiste.</span></div>
+        <span className="role-chip role-label">Label</span>
+      </header>
+      <nav className="embedded-label-tabs" aria-label="Navigation Label">
+        {items.map(([id, label, Icon]) => <button className={section === id ? "active" : ""} key={id} onClick={() => setSection(id)} type="button"><Icon size={15} /><span>{label}</span></button>)}
+      </nav>
+      <div className="embedded-label-content">{content}</div>
+    </section>
+  );
+
   return (
     <DashboardShell sidebar={
       <Sidebar title="Label Dashboard" subtitle={data?.profile?.name || "Mon label"} items={items} section={section} setSection={setSection}
@@ -1896,17 +1921,7 @@ export function LabelDashboard({ notify }) {
         }
       />
     }>
-      {loading ? <div className="db-loading"><Loader2 className="spin" size={28} /></div> :
-       error ? <AlertCard type="error" title="Erreur" text={error} /> : (
-        <>
-          {section === "overview"  && <LabelOverview data={data} />}
-          {section === "branding"  && <LabelBranding profile={data.profile} notify={notify} onRefresh={refresh} />}
-          {section === "roster"    && <LabelRoster roster={data.roster} notify={notify} onRefresh={refresh} />}
-          {section === "catalog"   && <LabelCatalog catalog={data.catalog} notify={notify} onRefresh={refresh} />}
-          {section === "analytics" && <LabelAnalytics stats={data.stats} series={data.series} roster={data.roster} catalog={data.catalog} />}
-          {section === "campaigns" && <LabelCampaigns campaigns={data.campaigns} />}
-        </>
-      )}
+      {content}
     </DashboardShell>
   );
 }

@@ -2653,8 +2653,7 @@ function UserMenu({ user, logout }) {
           <b>Signed in as <small>{user.email}</small></b>
           <a href={artistPath(user)} onClick={closeMenu}>Profile</a>
           <a href="/settings" onClick={closeMenu}>Settings</a>
-          <a href="/dashboard" onClick={closeMenu}>Dashboard artiste</a>
-          {hasLabelSubscription(user) && <a href="/dashboard/label" onClick={closeMenu}>Dashboard Label</a>}
+          <a href="/dashboard" onClick={closeMenu}>Dashboard</a>
           {["staff", "moderator", "admin"].includes(user.role) && <a href="/staff-dashboard" onClick={closeMenu}>Panel {user.role}</a>}
           <a href="/payouts" onClick={closeMenu}>Payouts</a>
           <button onClick={logoutAndClose}><LogOut size={15} /> Logout</button>
@@ -3022,12 +3021,11 @@ function CrateDropSection({ notify, playRelease }) {
 }
 
 // /dashboard → dashboard artiste (label voit LabelDashboard, sinon ancien Dashboard)
-function SmartArtistDashboard({ notify, playRelease }) {
+function SmartArtistDashboard({ notify, playRelease, section = "overview" }) {
   const { user, loading } = useAuth();
   if (loading) return <main className="page"><div className="db-loading"><Loader2 className="spin" size={28} /></div></main>;
   if (!user) return <AuthPage mode="login" notify={notify} />;
-  if (hasLabelSubscription(user)) return <LabelDashboard notify={notify} />;
-  return <Dashboard notify={notify} playRelease={playRelease} section="overview" />;
+  return <Dashboard notify={notify} playRelease={playRelease} section={section} />;
 }
 
 // /staff-dashboard → panel opérationnel (staff, mod, admin uniquement)
@@ -3071,7 +3069,7 @@ function renderRoute(route, notify, playRelease) {
   if (path === "/staff") return <SmartStaffPanel notify={notify} />;
   if (path === "/staff-dashboard") return <SmartStaffPanel notify={notify} />;
   if (path === "/dashboard") return <SmartArtistDashboard notify={notify} playRelease={playRelease} />;
-  if (path === "/dashboard/label") return <LabelDashboard notify={notify} />;
+  if (path === "/dashboard/label") return <SmartArtistDashboard notify={notify} playRelease={playRelease} section="label" />;
   if (path === "/dashboard/pro") return <ProDashboard notify={notify} playRelease={playRelease} />;
   if (path === "/mod-dashboard") return <ModeratorDashboard notify={notify} />;
   if (path === "/admin-dashboard") return <AdminDashboard notify={notify} />;
@@ -5797,13 +5795,13 @@ function DashboardSidebar({ section }) {
     { href: "/dashboard", label: "Overview", icon: HomeIcon, id: "overview" },
     { href: "/catalog", label: "Catalog", icon: Package, id: "catalog" },
     { href: "/analytics", label: "Analytics", icon: BarChart3, id: "analytics" },
-    { href: "/payouts", label: "Payouts", icon: Wallet, id: "payouts" }
+    { href: "/payouts", label: "Payouts", icon: Wallet, id: "payouts" },
+    ...(hasLabelSubscription(user) ? [{ href: "/dashboard/label", label: "Label", icon: Building2, id: "label" }] : [])
   ];
   const tools = [
     { href: "/upload", label: "Upload release", icon: Upload },
     { href: "/settings", label: "Settings", icon: Settings },
     { href: "/pricing", label: "Plans", icon: CreditCard },
-    ...(hasLabelSubscription(user) ? [{ href: "/dashboard/label", label: "Label manager", icon: Tag }] : []),
     ...(["staff", "moderator", "admin"].includes(user?.role) ? [{ href: "/staff-dashboard", label: "Panel " + (user?.role || "staff"), icon: ShieldCheck }] : [])
   ];
   return (
@@ -6436,6 +6434,7 @@ function Dashboard({ section, notify, playRelease }) {
           )}
           {section === "analytics" && <Analytics releases={releases} stats={stats} />}
           {section === "payouts" && <Payouts stats={stats} notify={notify} />}
+          {section === "label" && <LabelDashboard notify={notify} embedded />}
         </div>
       </div>
     </main>

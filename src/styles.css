@@ -3527,6 +3527,19 @@ textarea { min-height: 120px; resize: vertical; }
 .catalog-edit-actions > div svg { color: var(--success); }
 .catalog-edit-actions .button { min-height: 40px; }
 .catalog-edit-actions .button.accent { min-width: 210px; }
+.embedded-label-workspace { background: rgba(20,20,32,.72); border: 1px solid var(--border); border-radius: 14px; margin-top: 2px; overflow: hidden; }
+.embedded-label-head { align-items: center; background: linear-gradient(110deg, rgba(212,232,87,.09), rgba(139,92,246,.045) 48%, transparent); border-bottom: 1px solid var(--line); display: flex; gap: 18px; justify-content: space-between; padding: 20px 22px; }
+.embedded-label-head .label, .embedded-label-head h2, .embedded-label-head span { margin: 0; }
+.embedded-label-head h2 { color: #fff; font-size: 22px; margin-top: 3px; }
+.embedded-label-head > div > span { color: var(--muted); display: block; font-size: 12px; margin-top: 5px; }
+.embedded-label-tabs { background: rgba(5,5,10,.34); border-bottom: 1px solid var(--line); display: flex; gap: 4px; overflow-x: auto; padding: 9px 12px; scrollbar-width: none; }
+.embedded-label-tabs::-webkit-scrollbar { display: none; }
+.embedded-label-tabs button { align-items: center; background: transparent; border: 1px solid transparent; border-radius: 8px; color: var(--muted); display: flex; flex: 0 0 auto; font-size: 11px; font-weight: 750; gap: 7px; min-height: 37px; padding: 8px 11px; }
+.embedded-label-tabs button:hover { background: rgba(255,255,255,.035); color: #fff; }
+.embedded-label-tabs button.active { background: rgba(212,232,87,.1); border-color: rgba(212,232,87,.22); color: var(--accent); }
+.embedded-label-content { padding: 20px; }
+.embedded-label-content .db-section { max-width: none; }
+.embedded-label-content .section-header:first-child { margin-top: 0; }
 .empty-state {
   align-items: center;
   border: 1px dashed var(--border);
@@ -6956,6 +6969,12 @@ textarea { min-height: 120px; resize: vertical; }
   .catalog-current-cover .pack-art { max-width: 90px; }
   .catalog-edit-actions { display: grid; grid-template-columns: 1fr 1.6fr; padding: 11px; }
   .catalog-edit-actions .button, .catalog-edit-actions .button.accent { min-width: 0; padding-inline: 10px; width: 100%; }
+  .embedded-label-head { align-items: flex-start; padding: 16px; }
+  .embedded-label-head > div > span { font-size: 10px; }
+  .embedded-label-tabs { padding-inline: 8px; }
+  .embedded-label-tabs button span { display: none; }
+  .embedded-label-tabs button { justify-content: center; min-width: 38px; padding: 8px; }
+  .embedded-label-content { padding: 14px; }
 }
 
 @media (max-width: 620px) {
