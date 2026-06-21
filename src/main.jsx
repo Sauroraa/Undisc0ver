@@ -6530,6 +6530,7 @@ function DashboardCatalogManager({ releases, notify, playRelease, onRefresh }) {
                 <ReleaseEditForm
                   release={release}
                   notify={notify}
+                  onCancel={() => setEditingId("")}
                   onDone={() => {
                     setEditingId("");
                     onRefresh();
@@ -6550,7 +6551,7 @@ function visibilityLabel(value = "public") {
   return "Public";
 }
 
-function ReleaseEditForm({ release, notify, onDone }) {
+function ReleaseEditForm({ release, notify, onDone, onCancel }) {
   const [form, setForm] = useState(() => ({
     title: release.title || "",
     featured_artist: release.featured_artist || "",
@@ -6592,25 +6593,67 @@ function ReleaseEditForm({ release, notify, onDone }) {
 
   return (
     <form className="catalog-edit-form" onSubmit={save}>
-      <div className="catalog-edit-grid">
-        <label>Titre<input value={form.title} onChange={(e) => update("title", e.target.value)} required /></label>
-        <label>Artiste invite / collab<input value={form.featured_artist} onChange={(e) => update("featured_artist", e.target.value)} placeholder="ex: Julix, label, collectif..." /></label>
-        <label>Type<select value={form.kind} onChange={(e) => update("kind", e.target.value)}><option>Track</option><option>EP</option><option>Album</option><option>Dubpack</option><option>Sample pack</option></select></label>
-        <label>Genre<select value={form.genre} onChange={(e) => update("genre", e.target.value)}><option>Tech House</option><option>Techno</option><option>Melodic</option><option>Afro House</option><option>Drum & Bass</option><option>Hard Techno</option><option>Riddim</option><option>Dubstep</option><option>Electronic</option></select></label>
-        <label>Tracks<input type="number" min="1" value={form.tracks} onChange={(e) => update("tracks", e.target.value)} /></label>
-        <label>Duree<input value={form.duration} onChange={(e) => update("duration", e.target.value)} placeholder="03:42" /></label>
-        <label>Visibilite<select value={form.visibility} onChange={(e) => update("visibility", e.target.value)}><option value="public">Public</option><option value="unlisted">Non repertoriee</option><option value="private">Privee</option></select></label>
-        <label>Prix EUR<input type="number" min="0" step="0.01" value={form.price} disabled={form.free} onChange={(e) => update("price", e.target.value)} /></label>
+      <header className="catalog-edit-header">
+        <div className="catalog-edit-heading">
+          <span className="catalog-edit-icon"><Settings size={17} /></span>
+          <div><p className="label">Édition du catalogue</p><h3>Modifier « {release.title} »</h3><span>Les changements sont appliqués immédiatement sur la page publique.</span></div>
+        </div>
+        <button className="catalog-edit-close" type="button" onClick={onCancel} aria-label="Fermer l'éditeur"><X size={18} /></button>
+      </header>
+
+      <div className="catalog-edit-layout">
+        <aside className="catalog-edit-artwork">
+          <div className="catalog-current-cover">
+            <PackArtwork release={{ ...release, cover_url: form.cover_url }} large />
+            <div><strong>Cover actuelle</strong><span>Format recommandé : 1400 × 1400 px</span></div>
+          </div>
+          <ImageUploadPanel file={coverFile} setFile={setCoverFile} title="Remplacer la cover" text="Dépose une image ou clique pour parcourir." defaultWidth={1400} defaultHeight={1400} />
+          <details className="catalog-cover-url">
+            <summary><LinkIcon size={14} /> URL de la cover</summary>
+            <label><span>Adresse actuelle</span><input value={form.cover_url} onChange={(e) => update("cover_url", e.target.value)} placeholder="/uploads/cover.webp" /></label>
+          </details>
+        </aside>
+
+        <div className="catalog-edit-content">
+          <section className="catalog-edit-section">
+            <div className="catalog-edit-section-title"><span>01</span><div><h4>Informations principales</h4><p>Ce que les auditeurs voient en premier.</p></div></div>
+            <div className="catalog-edit-grid">
+              <label className="catalog-field-wide"><span>Titre du son</span><input value={form.title} onChange={(e) => update("title", e.target.value)} required /></label>
+              <label><span>Artiste invité / collab</span><input value={form.featured_artist} onChange={(e) => update("featured_artist", e.target.value)} placeholder="Nom de l'artiste ou du collectif" /></label>
+              <label><span>Genre</span><select value={form.genre} onChange={(e) => update("genre", e.target.value)}><option>Tech House</option><option>Techno</option><option>Melodic</option><option>Afro House</option><option>Drum & Bass</option><option>Hard Techno</option><option>Riddim</option><option>Dubstep</option><option>Electronic</option></select></label>
+            </div>
+          </section>
+
+          <section className="catalog-edit-section">
+            <div className="catalog-edit-section-title"><span>02</span><div><h4>Détails de la sortie</h4><p>Format, durée et visibilité du contenu.</p></div></div>
+            <div className="catalog-edit-grid catalog-edit-grid-four">
+              <label><span>Type</span><select value={form.kind} onChange={(e) => update("kind", e.target.value)}><option>Track</option><option>EP</option><option>Album</option><option>Dubpack</option><option>Sample pack</option></select></label>
+              <label><span>Nombre de tracks</span><input type="number" min="1" value={form.tracks} onChange={(e) => update("tracks", e.target.value)} /></label>
+              <label><span>Durée</span><input value={form.duration} onChange={(e) => update("duration", e.target.value)} placeholder="03:42" /></label>
+              <label><span>Visibilité</span><select value={form.visibility} onChange={(e) => update("visibility", e.target.value)}><option value="public">Publique</option><option value="unlisted">Non répertoriée</option><option value="private">Privée</option></select></label>
+            </div>
+          </section>
+
+          <section className="catalog-edit-section">
+            <div className="catalog-edit-section-title"><span>03</span><div><h4>Accès et monétisation</h4><p>Choisis comment ton audience obtient le son.</p></div></div>
+            <div className="catalog-edit-commerce">
+              <label className={`catalog-option-card ${form.free ? "selected" : ""}`}><input type="checkbox" checked={form.free} onChange={(e) => update("free", e.target.checked)} /><span className="catalog-option-icon"><Tag size={17} /></span><span><strong>Sortie gratuite</strong><small>Aucun paiement demandé</small></span><i /></label>
+              <label className={`catalog-option-card ${form.download_enabled ? "selected" : ""}`}><input type="checkbox" checked={form.download_enabled} onChange={(e) => update("download_enabled", e.target.checked)} /><span className="catalog-option-icon"><Download size={17} /></span><span><strong>Téléchargement actif</strong><small>Autoriser le fichier audio</small></span><i /></label>
+              <label className={`catalog-price-field ${form.free ? "disabled" : ""}`}><span>Prix de vente</span><div><input type="number" min="0" step="0.01" value={form.price} disabled={form.free} onChange={(e) => update("price", e.target.value)} /><b>EUR</b></div><small>{form.free ? "Désactive la sortie gratuite pour fixer un prix." : "Prix affiché sur la page du son."}</small></label>
+            </div>
+          </section>
+
+          <section className="catalog-edit-section">
+            <div className="catalog-edit-section-title"><span>04</span><div><h4>Description</h4><p>Ajoute les crédits, le contexte et les liens utiles.</p></div></div>
+            <label className="catalog-description-field"><textarea rows="5" maxLength="1200" value={form.description} onChange={(e) => update("description", e.target.value)} placeholder="Parle de la création du son, ajoute les crédits et les liens importants..." /><small>{form.description.length}/1200</small></label>
+          </section>
+        </div>
       </div>
-      <label>Description<textarea rows="4" value={form.description} onChange={(e) => update("description", e.target.value)} placeholder="Description du son, credits, liens, details..." /></label>
-      <div className="catalog-edit-toggles">
-        <label><input type="checkbox" checked={form.free} onChange={(e) => update("free", e.target.checked)} /> Gratuit</label>
-        <label><input type="checkbox" checked={form.download_enabled} onChange={(e) => update("download_enabled", e.target.checked)} /> Download actif</label>
-      </div>
-      <ImageUploadPanel file={coverFile} setFile={setCoverFile} title="Nouvelle cover" text="Choisir une cover JPG, PNG ou WebP." defaultWidth={1400} defaultHeight={1400} />
-      <label>Cover URL actuelle<input value={form.cover_url} onChange={(e) => update("cover_url", e.target.value)} placeholder="/uploads/cover.webp" /></label>
+
       <div className="catalog-edit-actions">
-        <button className="button accent" type="submit" disabled={saving}>{saving ? <Loader2 className="spin" size={16} /> : <Check size={16} />} Sauvegarder</button>
+        <div><ShieldCheck size={14} /><span>Tes modifications sont sauvegardées de façon sécurisée.</span></div>
+        <button className="button ghost" type="button" onClick={onCancel} disabled={saving}>Annuler</button>
+        <button className="button accent" type="submit" disabled={saving}>{saving ? <Loader2 className="spin" size={16} /> : <Check size={16} />} Enregistrer les modifications</button>
       </div>
     </form>
   );
