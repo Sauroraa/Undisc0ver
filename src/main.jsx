@@ -2597,9 +2597,8 @@ function UserMenu({ user, logout }) {
           <b>Signed in as <small>{user.email}</small></b>
           <a href={artistPath(user)} onClick={closeMenu}>Profile</a>
           <a href="/settings" onClick={closeMenu}>Settings</a>
-          <a href="/dashboard" onClick={closeMenu}>Dashboard</a>
-          <a href="/catalog" onClick={closeMenu}>Catalog</a>
-          {["staff", "moderator", "admin"].includes(user.role) && <a href="/staff" onClick={closeMenu}>Staff panel</a>}
+          <a href="/dashboard" onClick={closeMenu}>Dashboard artiste</a>
+          {["staff", "moderator", "admin"].includes(user.role) && <a href="/staff-dashboard" onClick={closeMenu}>Panel {user.role}</a>}
           <a href="/payouts" onClick={closeMenu}>Payouts</a>
           <button onClick={logoutAndClose}><LogOut size={15} /> Logout</button>
         </div>
@@ -2965,16 +2964,15 @@ function CrateDropSection({ notify, playRelease }) {
   );
 }
 
-function SmartDashboard({ notify, playRelease }) {
+// /staff-dashboard → panel opérationnel (staff, mod, admin uniquement)
+function SmartStaffPanel({ notify }) {
   const { user, loading } = useAuth();
   if (loading) return <main className="page"><div className="db-loading"><Loader2 className="spin" size={28} /></div></main>;
   if (!user) return <AuthPage mode="login" notify={notify} />;
-  if (user.role === "admin")      return <AdminDashboard notify={notify} />;
-  if (user.role === "moderator")  return <ModeratorDashboard notify={notify} />;
-  if (user.role === "staff")      return <StaffDashboard notify={notify} />;
-  if (user.role === "label")      return <LabelDashboard notify={notify} />;
-  if (user.pro || user.plan === "pro") return <ProDashboard notify={notify} playRelease={playRelease} />;
-  return <UserDashboard notify={notify} playRelease={playRelease} />;
+  if (user.role === "admin")     return <AdminDashboard notify={notify} />;
+  if (user.role === "moderator") return <ModeratorDashboard notify={notify} />;
+  if (user.role === "staff")     return <StaffDashboard notify={notify} />;
+  return <Dashboard notify={notify} section="overview" />;
 }
 
 function renderRoute(route, notify, playRelease) {
@@ -3004,11 +3002,11 @@ function renderRoute(route, notify, playRelease) {
   if (path === "/privacy") return <PrivacyPage />;
   if (path === "/acceptable-use") return <AcceptableUsePage />;
   if (path === "/careers") return <CareersPage />;
-  if (path === "/staff") return <SmartDashboard notify={notify} playRelease={playRelease} />;
-  // Role-based dashboard routing (server enforces access, frontend dispatches by role)
-  if (path === "/dashboard") return <SmartDashboard notify={notify} playRelease={playRelease} />;
+  if (path === "/staff") return <SmartStaffPanel notify={notify} />;
+  if (path === "/staff-dashboard") return <SmartStaffPanel notify={notify} />;
+  if (path === "/dashboard") return <Dashboard notify={notify} playRelease={playRelease} section="overview" />;
+  if (path === "/dashboard/label") return <LabelDashboard notify={notify} />;
   if (path === "/dashboard/pro") return <ProDashboard notify={notify} playRelease={playRelease} />;
-  if (path === "/staff-dashboard") return <StaffDashboard notify={notify} />;
   if (path === "/mod-dashboard") return <ModeratorDashboard notify={notify} />;
   if (path === "/admin-dashboard") return <AdminDashboard notify={notify} />;
   if (path === "/catalog") return <Dashboard notify={notify} playRelease={playRelease} section="catalog" />;
@@ -5739,7 +5737,8 @@ function DashboardSidebar({ section }) {
     { href: "/upload", label: "Upload release", icon: Upload },
     { href: "/settings", label: "Settings", icon: Settings },
     { href: "/pricing", label: "Plans", icon: CreditCard },
-    ...(["staff", "moderator", "admin"].includes(user?.role) ? [{ href: "/staff", label: "Staff panel", icon: ShieldCheck }] : [])
+    ...(user?.role === "label" ? [{ href: "/dashboard/label", label: "Label manager", icon: Tag }] : []),
+    ...(["staff", "moderator", "admin"].includes(user?.role) ? [{ href: "/staff-dashboard", label: "Panel " + (user?.role || "staff"), icon: ShieldCheck }] : [])
   ];
   return (
     <aside className="dashboard-sidebar">
