@@ -66,7 +66,9 @@ import {
   Users,
   Wallet,
   Wifi as WifiIcon,
-  X
+  X,
+  Zap,
+  Infinity as InfinityIcon
 } from "lucide-react";
 import { AnimatePresence, motion, useScroll, useTransform } from "framer-motion";
 import "./styles.css";
@@ -1133,6 +1135,10 @@ function useI18n() {
 function money(cents) {
   if (!cents) return "Free";
   return `${Math.round(cents / 100)} EUR`;
+}
+
+function releasePrice(release) {
+  return release.free ? "Free" : money(release.price_cents);
 }
 
 function balanceMoney(cents) {
@@ -3642,7 +3648,7 @@ function ShuffleTrackGrid({ releases }) {
         <PackArtwork release={featured} />
         <span>{featured.genre}</span>
         <strong>{featured.title}</strong>
-        <small>{featured.artist} - {money(featured.price_cents)}</small>
+        <small>{featured.artist} - {releasePrice(featured)}</small>
       </motion.a>
       <div className="hero-side-releases">
         {sideItems.map((release, index) => (
@@ -3913,12 +3919,7 @@ function DiscoveryHub({ notify, playRelease }) {
           </section>
         )}
         {!!data.recommended?.length && (
-          <section className="discovery-section">
-            <SectionTitle title="Based on what you like" link="/explore" action="Explore" />
-            <div className="release-grid discovery-release-grid">
-              {data.recommended.slice(0, 8).map((release) => <ReleaseCard key={release.id} release={release} notify={notify} playRelease={playRelease} />)}
-            </div>
-          </section>
+          <RecommendedSection releases={data.recommended} notify={notify} playRelease={playRelease} />
         )}
       </div>
       <aside className="discovery-side">
@@ -3941,6 +3942,43 @@ function DiscoveryHub({ notify, playRelease }) {
           </section>
         )}
       </aside>
+    </section>
+  );
+}
+
+function RecommendedSection({ releases, notify, playRelease }) {
+  return (
+    <section className="reco-section">
+      <div className="reco-header">
+        <div>
+          <span className="label">Base sur ce que tu aimes</span>
+          <h2>Picks pour toi</h2>
+        </div>
+        <a className="button ghost small" href="/explore">Explorer →</a>
+      </div>
+      <div className="reco-scroll">
+        {releases.slice(0, 10).map((release) => (
+          <article key={release.id} className="reco-card">
+            <div className="reco-cover" onClick={() => playRelease(release)}>
+              <PackArtwork release={release} large />
+              <button className="reco-play" aria-label={`Play ${release.title}`}><Play size={18} fill="currentColor" /></button>
+            </div>
+            <div className="reco-info">
+              <span className="label">{release.kind} · {release.genre}</span>
+              <a href={`/release/${release.id}`} className="reco-title">{release.title}</a>
+              <span className="reco-artist">{release.artist}</span>
+              <div className="reco-meta">
+                <span className={release.free ? "price free" : "price"}>{releasePrice(release)}</span>
+                <span>{shortNumber(release.plays)} plays</span>
+              </div>
+              <div className="reco-actions">
+                {release.free ? <DownloadButton release={release} notify={notify} compact /> : <BuyButton release={release} notify={notify} compact />}
+                <RepostButton releaseId={release.id} notify={notify} compact />
+              </div>
+            </div>
+          </article>
+        ))}
+      </div>
     </section>
   );
 }
@@ -4142,90 +4180,123 @@ function ArtistProfile({ id, notify, playRelease }) {
     await navigator.clipboard?.writeText(profileUrl);
     notify("Profile link copied.");
   };
+  const [avatarErr, setAvatarErr] = useState(false);
+  const [bannerErr, setBannerErr] = useState(false);
+  const avatarSrc = !avatarErr && (artist.logo_url || artist.avatar_url);
+  const bannerSrc = !bannerErr && artist.banner_url;
+
   return (
     <main className="page artist-profile-page">
-      <section className={`artist-profile-hero ${artist.pro ? "is-pro" : ""}`}>
-        <div className={`artist-profile-banner tone-${artist.id.includes("nala") ? "blue" : artist.id.includes("mosser") ? "red" : "green"}`}>
-          {artist.banner_url ? <img className="artist-banner-image" src={artist.banner_url} alt="" /> : <><div className="profile-banner-noise" /><CrateMark className="cover-crate" /></>}
-          <div className="profile-banner-copy">
-            <span>Public artist profile</span>
-            <strong>{artist.name}</strong>
-          </div>
-          <div className="profile-banner-meter" aria-hidden="true">
-            {Array.from({ length: 18 }).map((_, index) => <i key={index} style={{ height: `${22 + (index % 6) * 9}px` }} />)}
-          </div>
+
+      {/* ── HERO BANNER ── */}
+      <div className="ap-hero">
+        <div className="ap-banner">
+          {bannerSrc
+            ? <img src={bannerSrc} alt="" className="ap-banner-img" onError={() => setBannerErr(true)} />
+            : <div className="ap-banner-gradient" />}
+          <div className="ap-banner-vignette" />
         </div>
-        <div className="artist-profile-panel">
-          <div className="artist-identity">
-            <span className="artist-avatar-xl">{artist.logo_url || artist.avatar_url ? <img src={artist.logo_url || artist.avatar_url} alt="" /> : artist.avatar}</span>
-            <div>
-              <div className="profile-badges">
-                <span className="badge soft">{artist.genre}</span>
+
+        <div className="ap-hero-body">
+          <div className="ap-identity">
+            <div className="ap-avatar-wrap">
+              <span className="ap-avatar">
+                {avatarSrc
+                  ? <img src={avatarSrc} alt={artist.name} onError={() => setAvatarErr(true)} />
+                  : <span className="ap-avatar-initials">{artist.avatar || artist.name?.[0]}</span>}
+              </span>
+              {artist.verified && <span className="ap-verified" title="Artiste vérifié"><ShieldCheck size={14} /></span>}
+            </div>
+            <div className="ap-name-block">
+              <div className="ap-badges">
+                {artist.genre && <span className="badge soft">{artist.genre}</span>}
                 <span className={`badge plan-${subscriptionValue(artist)}`}>{subscriptionLabel(artist)}</span>
-                {artist.verified ? <span className="badge accent">Verified artist</span> : null}
-                {staffRoleLabel(artist.role) ? <span className="badge role-badge">{staffRoleLabel(artist.role)}</span> : null}
+                {artist.verified && <span className="badge accent">Artiste vérifié</span>}
+                {staffRoleLabel(artist.role) && <span className="badge role-badge">{staffRoleLabel(artist.role)}</span>}
               </div>
-              <h1>{artist.name}</h1>
-              <p>{artist.bio || "Direct club music catalog, free gates, dubpacks and release drops."}</p>
-              <div className="artist-location-line">
-                <span><MapPin size={15} /> {artist.location}</span>
-                <span><Music2 size={15} /> {artist.releases_count} releases</span>
-                <span><HeadsetIcon size={15} /> Direct bookings</span>
-              </div>
-              <div className="button-row">
-                <FollowButton artistId={artist.id} notify={notify} />
-                <button className="button ghost" onClick={() => setShowBooking(true)}><CalendarIcon size={16} /> Booking</button>
-                <button className="button ghost" onClick={copyProfile}><Copy size={16} /> Copy link</button>
-              </div>
-              {showBooking && <BookingModal artist={artist} onClose={() => setShowBooking(false)} notify={notify} />}
-              <div className="artist-social-links">
-                {Object.entries(socialLinks).filter(([, href]) => href).map(([label, href]) => <a key={label} href={href} target="_blank" rel="noreferrer">{label}<ExternalLink size={13} /></a>)}
+              <h1 className="ap-name">{artist.name}</h1>
+              {artist.bio && <p className="ap-bio">{artist.bio}</p>}
+              <div className="ap-meta">
+                {artist.location && <span><MapPin size={13} /> {artist.location}</span>}
+                <span><Music2 size={13} /> {releases.length} sortie{releases.length !== 1 ? "s" : ""}</span>
+                <span><BarChart3 size={13} /> {shortNumber(artist.plays || releases.reduce((s, r) => s + Number(r.plays || 0), 0))} plays</span>
               </div>
             </div>
           </div>
 
-          <aside className="artist-profile-card">
-            <span className="label">Top release</span>
-            <strong>{topRelease?.title || "No releases yet"}</strong>
-            <small>{topRelease ? `${shortNumber(topRelease.plays)} plays - ${shortNumber(topRelease.downloads)} downloads` : "Upload coming soon"}</small>
-            {topRelease ? <a className="button accent" href={`/release/${topRelease.id}`}>Open release <ArrowUpRight size={16} /></a> : <a className="button accent" href="/upload">Upload release <Upload size={16} /></a>}
-          </aside>
+          <div className="ap-actions">
+            <FollowButton artistId={artist.id} notify={notify} />
+            <button className="button ghost" onClick={() => setShowBooking(true)}><CalendarIcon size={15} /> Booking</button>
+            <button className="button ghost icon-only" onClick={copyProfile} title="Copier le lien"><Copy size={15} /></button>
+            {Object.entries(socialLinks).filter(([, href]) => href).slice(0, 3).map(([label, href]) => (
+              <a key={label} className="button ghost icon-only" href={href} target="_blank" rel="noreferrer" title={label}><ExternalLink size={15} /></a>
+            ))}
+          </div>
         </div>
-      </section>
 
-      <section className="artist-profile-stats">
-        <article><BarChart3 size={18} /><span>Plays</span><strong>{shortNumber(artist.plays)}</strong><small>Public catalog reach</small></article>
-        <article><Download size={18} /><span>Downloads</span><strong>{shortNumber(totalDownloads)}</strong><small>{freeCount} free gate(s)</small></article>
-        <article><ShoppingCart size={18} /><span>Sales</span><strong>{shortNumber(totalSales)}</strong><small>{paidCount} paid drop(s)</small></article>
-        <article><Wallet size={18} /><span>Revenue</span><strong>{money(revenue)}</strong><small>Tracked from purchases</small></article>
-      </section>
+        {showBooking && <BookingModal artist={artist} onClose={() => setShowBooking(false)} notify={notify} />}
+      </div>
 
-      <section className="artist-profile-grid">
-        <article className="artist-detail-card">
-          <span className="label">Artist signal</span>
-          <h2>Built for clubs, DJs and direct fans.</h2>
-          <p>{artist.name} keeps the storefront focused: clear releases, fast actions, direct messages and a catalog that feels like a real crate.</p>
-          <div className="profile-mini-list">
-            <span><ShieldCheck size={15} /> Rights-aware uploads</span>
-            <span><WifiIcon size={15} /> Live release signals</span>
-            <span><Mail size={15} /> Booking and promo contact</span>
-          </div>
-        </article>
-        <article className="artist-detail-card compact">
-          <span className="label">Catalog status</span>
-          <div className="catalog-ratio">
-            <b>{releases.length || 0}</b>
-            <span>published</span>
-          </div>
-          <div className="catalog-bars">
-            <i style={{ width: `${releases.length ? Math.max(18, (freeCount / releases.length) * 100) : 0}%` }}><span>Free</span></i>
-            <i style={{ width: `${releases.length ? Math.max(18, (paidCount / releases.length) * 100) : 0}%` }}><span>Paid</span></i>
-          </div>
-        </article>
-      </section>
+      {/* ── STATS BAR ── */}
+      <div className="ap-stats">
+        <div><strong>{shortNumber(artist.plays || 0)}</strong><span>Plays</span></div>
+        <div><strong>{shortNumber(totalDownloads)}</strong><span>Downloads</span></div>
+        <div><strong>{shortNumber(totalSales)}</strong><span>Ventes</span></div>
+        <div><strong>{money(revenue)}</strong><span>Revenue</span></div>
+        <div><strong>{releases.length}</strong><span>Releases</span></div>
+      </div>
 
+      {/* ── TOP RELEASE + CATALOG SPLIT ── */}
+      {(topRelease || true) && (
+        <div className="ap-top-row">
+          <div className="ap-top-release">
+            <span className="label">Top release</span>
+            {topRelease ? (
+              <a href={`/release/${topRelease.id}`} className="ap-top-card">
+                <PackArtwork release={topRelease} large />
+                <div>
+                  <strong>{topRelease.title}</strong>
+                  <small>{topRelease.kind} · {topRelease.genre}</small>
+                  <div className="ap-top-stats">
+                    <span>{shortNumber(topRelease.plays)} plays</span>
+                    <span>{shortNumber(topRelease.downloads)} dl</span>
+                    <span className={topRelease.free ? "price free" : "price"}>{releasePrice(topRelease)}</span>
+                  </div>
+                </div>
+              </a>
+            ) : (
+              <a className="button accent" href="/upload"><Upload size={15} /> Upload une sortie</a>
+            )}
+          </div>
+          <div className="ap-catalog-split">
+            <span className="label">Catalogue</span>
+            <div className="ap-split-bars">
+              <div className="ap-split-bar">
+                <span>Free</span>
+                <div className="ap-bar-track">
+                  <div className="ap-bar-fill free" style={{ width: `${releases.length ? Math.round((freeCount / releases.length) * 100) : 0}%` }} />
+                </div>
+                <b>{freeCount}</b>
+              </div>
+              <div className="ap-split-bar">
+                <span>Payant</span>
+                <div className="ap-bar-track">
+                  <div className="ap-bar-fill paid" style={{ width: `${releases.length ? Math.round((paidCount / releases.length) * 100) : 0}%` }} />
+                </div>
+                <b>{paidCount}</b>
+              </div>
+            </div>
+            <div className="ap-split-badges">
+              <span><ShieldCheck size={13} /> Uploads vérifiés</span>
+              <span><HeadsetIcon size={13} /> Booking direct</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── RELEASES LIST ── */}
       <section className="section profile-releases-section">
-        <SectionTitle title="Latest releases" />
+        <SectionTitle title="Sorties" />
         <ProfileReleaseList releases={releases} notify={notify} playRelease={playRelease} />
       </section>
     </main>
@@ -4246,7 +4317,7 @@ function ProfileReleaseList({ releases, notify, playRelease }) {
             <span>{release.tracks} track(s) - {release.duration} - {release.gate || "No gate"}</span>
           </div>
           <div className="profile-release-meta">
-            <span className={release.free ? "price free" : "price"}>{money(release.price_cents)}</span>
+            <span className={release.free ? "price free" : "price"}>{releasePrice(release)}</span>
             <small>{shortNumber(release.plays)} plays</small>
             <small>{shortNumber(release.downloads)} downloads</small>
           </div>
@@ -4387,11 +4458,12 @@ function UploadPage({ notify }) {
     { id: "Dubpack", title: "Dubpack", text: "Pack for DJs, edits or private drops." }
   ];
   const [step, setStep] = useState(1);
-  const [form, setForm] = useState({ title: "", kind: "Track", genre: "Tech House", tracks: 1, duration: "06:00", price: 8, free: false, download_enabled: true, gate_actions: [], gate: "No gate", description: "", rights_confirmed: false, rights_owner: "", visibility: "public" });
+  const [form, setForm] = useState({ title: "", kind: "Track", genre: "Tech House", tracks: 1, duration: "06:00", price: 2, free: false, download_enabled: true, gate_actions: [], gate: "No gate", description: "", rights_confirmed: false, rights_owner: "", visibility: "public" });
   const [file, setFile] = useState(null);
   const [audioFiles, setAudioFiles] = useState([]);
   const [coverFile, setCoverFile] = useState(null);
   const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
   const { data: copyrightConfig } = useData("/copyright/config", []);
   if (!user) return <AuthRequired />;
   const autoRightsOwner = `${user.name || "Artist"} - Undiscover upload consent`;
@@ -4418,7 +4490,9 @@ function UploadPage({ notify }) {
   });
   const submit = async (e) => {
     e.preventDefault();
+    if (submitting) return;
     setError("");
+    setSubmitting(true);
     try {
       if (!file) throw new Error("Ajoute un fichier audio avant publication.");
       if (!form.rights_confirmed) throw new Error("Confirme les droits avant de publier.");
@@ -4456,6 +4530,8 @@ function UploadPage({ notify }) {
       }
     } catch (err) {
       setError(err.message);
+    } finally {
+      setSubmitting(false);
     }
   };
   return (
@@ -4468,7 +4544,7 @@ function UploadPage({ notify }) {
         {step === 3 && <section className="upload-step-card"><h2>Release details</h2><label>Track title<input value={form.title} onChange={(e) => update("title", e.target.value)} placeholder="e.g. Your release title" required /></label><div className="form-grid"><label>Type<select value={form.kind} onChange={(e) => update("kind", e.target.value)}><option>Track</option><option>EP</option><option>Dubpack</option></select></label><label>Genre<select value={form.genre} onChange={(e) => update("genre", e.target.value)}><option>Tech House</option><option>Techno</option><option>Melodic</option><option>Afro House</option><option>Drum & Bass</option><option>Hard Techno</option><option>Riddim</option><option>Dubstep</option></select></label><label>Tracks<input type="number" min="1" value={form.tracks} onChange={(e) => update("tracks", e.target.value)} /></label><label>Duration<input value={form.duration} onChange={(e) => update("duration", e.target.value)} /></label></div><label>Visibility<select value={form.visibility} onChange={(e) => update("visibility", e.target.value)}><option value="public">Public</option><option value="unlisted">Unlisted</option><option value="private">Private</option></select></label><label>Description<textarea value={form.description} onChange={(e) => update("description", e.target.value)} placeholder="Describe the release..." /></label></section>}
         {step === 4 && <section className="upload-step-card"><h2>Pricing, access and rights</h2><div className="segmented"><button type="button" className={form.free ? "active" : ""} onClick={() => update("free", true)}>Free</button><button type="button" className={!form.free ? "active" : ""} onClick={() => update("free", false)}>Fixed price</button></div>{!form.free && <div className="secure-preview-note"><ShieldCheck size={16} /><span>Paid releases only expose a signed 45-second preview. The full audio stays private until checkout/download rules allow access.</span></div>}{!form.free && <label>Price EUR<input type="number" min="1" value={form.price} onChange={(e) => update("price", e.target.value)} /></label>}<section className="download-gate-builder"><div className="gate-builder-head"><div><span className="eyebrow">Download gateway</span><h3>Choose fan actions before download.</h3><p>Build a clean gate: fans complete selected actions, then the WAV unlocks.</p></div><strong>{form.download_enabled ? `${form.gate_actions.length} action${form.gate_actions.length > 1 ? "s" : ""}` : "Stream only"}</strong></div><label className="check-line gate-download-toggle"><input type="checkbox" checked={form.download_enabled} onChange={(e) => update("download_enabled", e.target.checked)} /><span><b>Enable downloadable WAV</b><small>Turn off for stream-only releases.</small></span></label>{form.download_enabled ? <div className="gate-action-grid">{DOWNLOAD_GATE_ACTIONS.map((action) => <button type="button" className={form.gate_actions.includes(action.id) ? "selected" : ""} onClick={() => toggleGate(action.id)} key={action.id}><GateActionIcon action={action.id} /><span><b>{action.label}</b><small>{action.description}</small></span>{form.gate_actions.includes(action.id) && <Check size={16} />}</button>)}</div> : <p className="muted">Stream-only mode: buy/listen pages stay live, WAV download stays hidden.</p>}{form.download_enabled && <div className="gate-summary"><ShieldCheck size={16} /><span>{form.gate_actions.length ? `Fans must complete: ${form.gate_actions.map(gateActionLabel).join(" + ")}.` : "No action selected: the WAV button unlocks instantly after login."}</span></div>}</section><CopyrightCompliancePanel form={form} update={update} config={copyrightConfig} rightsOwner={autoRightsOwner} /></section>}
         {error && <p className="error">{error}</p>}
-        <div className="upload-step-actions">{step > 1 && <button className="button ghost" type="button" onClick={() => setStep((current) => Math.max(1, current - 1))}>Back</button>}{step < 4 ? <button className="button accent" type="button" onClick={nextStep}>Continue</button> : <button className="button accent" type="submit"><Upload size={17} /> Publish release</button>}</div>
+        <div className="upload-step-actions">{step > 1 && <button className="button ghost" type="button" onClick={() => setStep((current) => Math.max(1, current - 1))}>Back</button>}{step < 4 ? <button className="button accent" type="button" onClick={nextStep}>Continue</button> : <button className="button accent" type="submit" disabled={submitting}>{submitting ? <><Loader2 className="spin" size={16} /> Publication…</> : <><Upload size={17} /> Publier la release</>}</button>}</div>
       </form>
     </main>
   );
@@ -4825,40 +4901,95 @@ function PricingPage({ notify }) {
     }
   };
 
+  const proFeatures = [
+    { icon: InfinityIcon, label: "Releases illimitées", sub: "Gratuit = 3 max. Pro = sans limite." },
+    { icon: BarChart3, label: "Analytics avancés", sub: "Plays par jour, pays, sources de trafic." },
+    { icon: Zap, label: "Payout accéléré", sub: "File prioritaire, virement sous 48h." },
+    { icon: Tag, label: "Campaigns sponsorisées", sub: "Mets ta release en tête de catalog." },
+    { icon: ShieldCheck, label: "Badge Pro vérifié", sub: "Affiché sur ton profil et tes releases." },
+    { icon: Bell, label: "Notifications prioritaires", sub: "Sois notifié en premier des reposts/likes." },
+    { icon: CalendarIcon, label: "Booking direct", sub: "Formulaire de contact sur ton profil." },
+    { icon: Music2, label: "Playlists publiques", sub: "Crée et partage des playlists de ton catalog." },
+  ];
+
   return (
-    <main className="page">
-      <PageHeader eyebrow="Pricing" title="Pricing based on your success." text="Simple plans for artists who want to publish, sell and measure their releases without a heavy platform stack." />
-      <section className="pricing-section">
-        <div className="pricing-intro">
-          <span className="outline-tag">Pricing</span>
-          <h2>One yard. Two ways to grow.</h2>
-          <p>Start free, then upgrade when your catalog needs pro tools, advanced analytics and payout acceleration.</p>
+    <main className="page pricing-page">
+      <div className="pricing-hero">
+        <span className="label">Pricing</span>
+        <h1>Publie plus. <br /><em>Vends mieux.</em></h1>
+        <p>Commence gratuit. Upgrade quand ton catalog prend de la vitesse.</p>
+      </div>
+
+      <div className="pricing-plans">
+        {/* FREE */}
+        <div className="plan-card">
+          <div className="plan-card-top">
+            <span className="plan-name">Gratuit</span>
+            <div className="price-line"><strong>0</strong><small>EUR / mois</small></div>
+            <p>Pour tester, publier tes premiers sons et toucher tes premiers fans.</p>
+          </div>
+          <ul className="plan-features">
+            <li><Check size={14} /> 3 releases actives</li>
+            <li><Check size={14} /> Download gates (like / follow / share)</li>
+            <li><Check size={14} /> Profil artiste public</li>
+            <li><Check size={14} /> Ventes directes (commission 10%)</li>
+            <li className="muted"><X size={14} /> Analytics avancés</li>
+            <li className="muted"><X size={14} /> Campaigns sponsorisées</li>
+            <li className="muted"><X size={14} /> Payout accéléré</li>
+            <li className="muted"><X size={14} /> Badge Pro</li>
+          </ul>
+          <button className="button ghost" onClick={() => navigate("/upload")}>Commencer gratuitement</button>
         </div>
-        <div className="pricing-card">
-          <Plus className="corner top-left" size={20} />
-          <Plus className="corner top-right" size={20} />
-          <Plus className="corner bottom-left" size={20} />
-          <Plus className="corner bottom-right" size={20} />
-          <article>
-            <div className="plan-head"><h3>Monthly</h3><span><s>9 EUR</s><b>11% off</b></span></div>
-            <p>Best value for artists testing a release cycle.</p>
-            <div className="price-line"><small>EUR</small><strong>7.99</strong><span>/month</span></div>
-            <button className="button ghost" onClick={() => startCheckout("pro")} disabled={!!loading}>
-              {loading === "pro" ? "Redirection…" : "Start Your Journey"}<CreditCard size={15} />
-            </button>
-          </article>
-          <article className="featured-plan">
-            <span className="border-trail" />
-            <div className="plan-head"><h3>Yearly</h3><span><s>9 EUR</s><b>22% off</b></span></div>
-            <p>Unlock savings with an annual commitment.</p>
-            <div className="price-line"><small>EUR</small><strong>6.99</strong><span>/month</span></div>
-            <button className="button accent" onClick={() => startCheckout("label")} disabled={!!loading}>
-              {loading === "label" ? "Redirection…" : "Get Started Now"}<ArrowUpRight size={15} />
-            </button>
-          </article>
+
+        {/* PRO */}
+        <div className="plan-card plan-card-pro">
+          <span className="plan-card-badge">Le plus populaire</span>
+          <div className="plan-card-top">
+            <span className="plan-name">Pro</span>
+            <div className="price-line"><small>EUR</small><strong>7.99</strong><span>/ mois</span></div>
+            <p>Pour les artistes qui veulent scaler leur catalog et leurs revenus.</p>
+          </div>
+          <ul className="plan-features">
+            {proFeatures.map(({ icon: Icon, label, sub }) => (
+              <li key={label}><Icon size={14} /> <span><b>{label}</b><small>{sub}</small></span></li>
+            ))}
+          </ul>
+          <button className="button accent stripe-pay-button" onClick={() => startCheckout("pro")} disabled={!!loading}>
+            {loading === "pro" ? <><Loader2 className="spin" size={15} /> Redirection…</> : <><CreditCard size={15} /> Passer à Pro — 7.99 EUR/mois</>}
+          </button>
+          <p className="payment-note"><ShieldCheck size={12} /> Paiement sécurisé via Stripe · Annulable à tout moment</p>
         </div>
-        <p className="secure-note"><ShieldCheck size={16} /> Access to all release tools with no hidden fees.</p>
-      </section>
+
+        {/* LABEL */}
+        <div className="plan-card plan-card-label">
+          <div className="plan-card-top">
+            <span className="plan-name">Label</span>
+            <div className="price-line"><small>EUR</small><strong>6.99</strong><span>/ mois <em>(annuel)</em></span></div>
+            <p>Tout Pro + multi-artistes, gestion d'équipe et stats agrégées.</p>
+          </div>
+          <ul className="plan-features">
+            <li><Check size={14} /> Tout ce qu'il y a dans Pro</li>
+            <li><Zap size={14} /> <span><b>Multi-artistes</b><small>Gère plusieurs profils depuis un compte.</small></span></li>
+            <li><BarChart3 size={14} /> <span><b>Stats agrégées</b><small>Vue globale de ton roster.</small></span></li>
+            <li><Users size={14} /> <span><b>Accès équipe</b><small>Invite tes co-managers.</small></span></li>
+          </ul>
+          <button className="button ghost" onClick={() => startCheckout("label")} disabled={!!loading}>
+            {loading === "label" ? "Redirection…" : "Passer à Label — 6.99 EUR/mois"}
+          </button>
+          <p className="payment-note"><ShieldCheck size={12} /> Facturation annuelle · Économise 24%</p>
+        </div>
+      </div>
+
+      <div className="pricing-proof">
+        <span className="label">Pourquoi Pro ?</span>
+        <div className="proof-grid">
+          <div><strong>+∞</strong><span>Releases sans limite</span></div>
+          <div><strong>48h</strong><span>Payout rapide</span></div>
+          <div><strong>10→5%</strong><span>Commission réduite</span></div>
+          <div><strong>1er</strong><span>Slot catalog sponsorisé</span></div>
+        </div>
+      </div>
+
       <EightBitCTA />
       <CompareTable />
       <FAQAccordion />
@@ -5866,7 +5997,7 @@ function ReleaseRow({ release, index, notify, playRelease, ranked, showModeratio
       <span className={`avatar ${release.color}`}>{release.avatar}</span>
       <a className="release-main" href={`/release/${release.id}`}><strong>{release.title}</strong><span>{release.artist} - {release.genre} - {release.duration}</span></a>
       {showModeration && <ModerationBadge release={release} />}
-      <span className={release.free ? "price free" : "price"}>{money(release.price_cents)}</span>
+      <span className={release.free ? "price free" : "price"}>{releasePrice(release)}</span>
       <small>{shortNumber(release.plays)}</small>
     </article>
   );
@@ -5920,15 +6051,17 @@ function PackCard({ release }) {
       <PackArtwork release={release} />
       <strong>{release.title}</strong>
       <span>{release.artist} - {release.tracks} tracks</span>
-      <b>{money(release.price_cents)}</b>
+      <b>{releasePrice(release)}</b>
     </a>
   );
 }
 
 function PackArtwork({ release, large = false }) {
+  const [imgErr, setImgErr] = useState(false);
+  const showImg = release.cover_url && !imgErr;
   return (
     <div className={`pack-art ${release.color || "green"} ${large ? "large" : ""}`}>
-      {release.cover_url ? <img src={release.cover_url} alt="" /> : <CrateMark />}
+      {showImg ? <img src={release.cover_url} alt="" onError={() => setImgErr(true)} /> : <CrateMark />}
     </div>
   );
 }
@@ -6068,12 +6201,12 @@ function DownloadButton({ release, notify, compact = false }) {
 
 function BuyButton({ release, notify, compact = false }) {
   const { user } = useAuth();
+  if (release.free) return <DownloadButton release={release} notify={notify} compact={compact} />;
   const click = async () => {
     if (!user) return navigate("/login");
-    notify(`Checkout opened for ${release.title}.`);
     navigate(`/checkout?release=${release.id}`);
   };
-  return <button className="button accent" onClick={click}><ShoppingCart size={16} /> {compact ? money(release.price_cents) : `Buy ${money(release.price_cents)}`}</button>;
+  return <button className="button accent" onClick={click}><ShoppingCart size={16} /> {compact ? money(release.price_cents) : `Acheter ${money(release.price_cents)}`}</button>;
 }
 
 function FollowButton({ artistId, notify }) {
