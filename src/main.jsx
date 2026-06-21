@@ -6226,8 +6226,8 @@ function CampaignRow({ campaign, onAction, actionBusy }) {
   );
 }
 
-function ArtistInsightsPanel() {
-  const { data, loading } = useData("/campaigns/insights/me");
+function ArtistInsightsPanel({ refreshKey = 0 }) {
+  const { data, loading } = useData("/campaigns/insights/me", [refreshKey]);
   const [dismissed, setDismissed] = useState(new Set());
   const insights = (data?.insights || []).filter(i => !dismissed.has(i.id));
   if (loading || !insights.length) return null;
@@ -6250,8 +6250,8 @@ function ArtistInsightsPanel() {
   );
 }
 
-function ArtistGoalsPanel() {
-  const { data, loading } = useData("/campaigns/goals/me");
+function ArtistGoalsPanel({ refreshKey = 0 }) {
+  const { data, loading } = useData("/campaigns/goals/me", [refreshKey]);
   const goals = (data?.goals || []).filter(g => g.status === "active");
   if (loading || !goals.length) return null;
   return (
@@ -6269,8 +6269,8 @@ function ArtistGoalsPanel() {
   );
 }
 
-function ProfileScorePanel() {
-  const { data, loading } = useData("/campaigns/profile-score/me");
+function ProfileScorePanel({ refreshKey = 0 }) {
+  const { data, loading } = useData("/campaigns/profile-score/me", [refreshKey]);
   if (loading || !data) return null;
   const { score, improvement_actions } = data;
   const labelColors = { weak: "#ef4444", correct: "#f59e0b", solid: "#10b981", premium: "#22c55e" };
@@ -6348,9 +6348,9 @@ function CampaignManager({ releases, notify }) {
       )}
 
       <div className="campaign-insights-row">
-        <ArtistInsightsPanel />
-        <ArtistGoalsPanel />
-        <ProfileScorePanel />
+        <ArtistInsightsPanel refreshKey={refreshKey} />
+        <ArtistGoalsPanel refreshKey={refreshKey} />
+        <ProfileScorePanel refreshKey={refreshKey} />
       </div>
 
       <div className="campaign-list">

@@ -615,14 +615,36 @@ campaignsRouter.get("/insights/me", authRequired, (req, res) => {
 
   const insights = generateInsights(req.user, releases, []);
 
-  // Upsert insights to DB for dismissal tracking
-  const existing = new Set(db.prepare("SELECT CONCAT(insight_type, '|', COALESCE(release_id,'')) key FROM artist_insights WHERE user_id = ? AND dismissed = 0").all(req.user.id).map(r => r.key));
-  for (const insight of insights) {
-    const key = `${insight.type}|${insight.release_id || ""}`;
-    if (!existing.has(key)) {
-      db.prepare("INSERT OR IGNORE INTO artist_insights (id, user_id, release_id, insight_type, priority, title, body, action_url, action_label) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
-        .run(id("ins"), req.user.id, insight.release_id || null, insight.type, insight.priority, insight.title, insight.body, insight.action_url || "", insight.action_label || "");
+  // Reconcile stored insights with current data. Resolved advice disappears
+  // automatically; dismissed advice stays hidden until its condition is fixed.
+  const keyOf = (item) => `${item.insight_type || item.type}|${item.release_id || ""}`;
+  const generatedByKey = new Map(insights.map((insight) => [keyOf(insight), insight]));
+  const stored = db.prepare("SELECT * FROM artist_insights WHERE user_id = ? ORDER BY dismissed DESC, created_at ASC").all(req.user.id);
+  const storedByKey = new Map();
+
+  for (const row of stored) {
+    const key = keyOf(row);
+    const current = generatedByKey.get(key);
+    if (!current) {
+      db.prepare("DELETE FROM artist_insights WHERE id = ?").run(row.id);
+      continue;
     }
+    if (storedByKey.has(key)) {
+      db.prepare("DELETE FROM artist_insights WHERE id = ?").run(row.id);
+      continue;
+    }
+    storedByKey.set(key, row);
+    if (!row.dismissed) {
+      db.prepare("UPDATE artist_insights SET priority = ?, title = ?, body = ?, action_url = ?, action_label = ? WHERE id = ?")
+        .run(current.priority, current.title, current.body, current.action_url || "", current.action_label || "", row.id);
+    }
+  }
+
+  for (const insight of insights) {
+    const key = keyOf(insight);
+    if (storedByKey.has(key)) continue;
+    db.prepare("INSERT INTO artist_insights (id, user_id, release_id, insight_type, priority, title, body, action_url, action_label) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+      .run(id("ins"), req.user.id, insight.release_id || null, insight.type, insight.priority, insight.title, insight.body, insight.action_url || "", insight.action_label || "");
   }
 
   const active = db.prepare("SELECT * FROM artist_insights WHERE user_id = ? AND dismissed = 0 ORDER BY priority ASC LIMIT 8").all(req.user.id);

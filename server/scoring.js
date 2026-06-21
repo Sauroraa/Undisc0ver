@@ -218,13 +218,13 @@ export function generateInsights(user, releases = [], campaignStats = []) {
 
   // Profile completeness issues
   if (!user.avatar_url && (!user.avatar || user.avatar.length <= 2)) {
-    insights.push({ type: "profile", priority: priority++, title: "Ajoute une photo de profil", body: "Les profils avec une vraie photo reçoivent 3× plus de follows.", action_url: "/settings", action_label: "Modifier le profil" });
+    insights.push({ type: "profile_avatar", priority: priority++, title: "Ajoute une photo de profil", body: "Les profils avec une vraie photo reçoivent 3× plus de follows.", action_url: "/settings", action_label: "Modifier le profil" });
   }
   if (!user.banner_url) {
-    insights.push({ type: "profile", priority: priority++, title: "Ajoute une bannière", body: "Une bannière personnalisée rend ton profil plus professionnel et mémorable.", action_url: "/settings", action_label: "Modifier le profil" });
+    insights.push({ type: "profile_banner", priority: priority++, title: "Ajoute une bannière", body: "Une bannière personnalisée rend ton profil plus professionnel et mémorable.", action_url: "/settings", action_label: "Modifier le profil" });
   }
   if ((user.bio || "").trim().length < 30) {
-    insights.push({ type: "profile", priority: priority++, title: "Complète ta bio", body: "Une bio de qualité aide les auditeurs à te découvrir et à te suivre.", action_url: "/settings", action_label: "Ajouter une bio" });
+    insights.push({ type: "profile_bio", priority: priority++, title: "Complète ta bio", body: "Écris au moins 30 caractères pour présenter clairement ton univers aux auditeurs.", action_url: "/settings", action_label: "Enrichir la bio" });
   }
 
   // Track-level insights
@@ -235,17 +235,17 @@ export function generateInsights(user, releases = [], campaignStats = []) {
     const comments = Number(release.comments || 0);
 
     if (plays > 50 && likes / plays < 0.01) {
-      insights.push({ type: "engagement", priority: priority++, release_id: release.id, title: `"${release.title}" — Peu de likes`, body: "Ton son est écouté mais peu liké. Essaie d'ajouter une description engageante ou d'inviter les auditeurs à réagir.", action_url: `/release/${release.id}`, action_label: "Modifier la release" });
+      insights.push({ type: "engagement_low_likes", priority: priority++, release_id: release.id, title: `"${release.title}" — Peu de likes`, body: "Ton son est écouté mais peu liké. Essaie d'ajouter une description engageante ou d'inviter les auditeurs à réagir.", action_url: `/release/${release.id}`, action_label: "Modifier la release" });
     }
     if (!release.cover_url) {
-      insights.push({ type: "quality", priority: priority++, release_id: release.id, title: `"${release.title}" — Pas de cover`, body: "Les sons sans cover reçoivent jusqu'à 60% moins de clics. Ajoute une image maintenant.", action_url: `/release/${release.id}`, action_label: "Ajouter une cover" });
+      insights.push({ type: "quality_cover", priority: priority++, release_id: release.id, title: `"${release.title}" — Pas de cover`, body: "Les sons sans cover reçoivent jusqu'à 60% moins de clics. Ajoute une image maintenant.", action_url: `/catalog`, action_label: "Ajouter une cover" });
     }
     if ((release.description || "").length < 20) {
-      insights.push({ type: "quality", priority: priority++, release_id: release.id, title: `"${release.title}" — Description vide`, body: "Ajoute une description pour le SEO et pour accrocher l'auditeur.", action_url: `/release/${release.id}`, action_label: "Ajouter une description" });
+      insights.push({ type: "quality_description", priority: priority++, release_id: release.id, title: `"${release.title}" — Description trop courte`, body: "Ajoute au moins 20 caractères pour le SEO et pour accrocher l'auditeur.", action_url: `/catalog`, action_label: "Modifier la description" });
     }
     // Growth opportunity
     if (plays > 200 && likes / plays > 0.05) {
-      insights.push({ type: "campaign", priority: priority++, release_id: release.id, title: `"${release.title}" — Bon potentiel`, body: "Ce son convertit très bien. Un boost léger pourrait décupler les écoutes.", action_url: "/campaigns/create", action_label: "Lancer un boost" });
+      insights.push({ type: "campaign_potential", priority: priority++, release_id: release.id, title: `"${release.title}" — Bon potentiel`, body: "Ce son convertit très bien. Un boost léger pourrait décupler les écoutes.", action_url: "/dashboard", action_label: "Lancer un boost" });
     }
   }
 
