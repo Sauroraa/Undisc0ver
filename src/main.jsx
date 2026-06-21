@@ -1260,7 +1260,7 @@ function artistPublicUrl(artist = {}) {
 }
 
 function subscriptionValue(entity = {}) {
-  const value = String(entity.plan || entity.artist_plan || (entity.pro ? "pro" : "free")).toLowerCase();
+  const value = String(entity?.plan || entity?.artist_plan || (entity?.pro ? "pro" : "free")).toLowerCase();
   return value === "creator" ? "free" : value;
 }
 
@@ -5345,6 +5345,28 @@ function PaymentForm({ notify, releaseId, planName }) {
   );
 }
 
+function settingsProfileFromUser(user) {
+  const account = user || {};
+  let socialLinks = {};
+  try { socialLinks = JSON.parse(account.social_links || "{}"); } catch { socialLinks = {}; }
+  return {
+    name: account.name || "",
+    email: account.email || "",
+    location: account.location || "",
+    genre: account.genre || "Tech House",
+    bio: account.bio || "",
+    avatar_url: account.avatar_url || "",
+    logo_url: account.logo_url || "",
+    banner_url: account.banner_url || "",
+    artist_slug: account.artist_slug || "",
+    workspace_visibility: account.workspace_visibility || "public",
+    instagram: socialLinks.instagram || "",
+    soundcloud: socialLinks.soundcloud || "",
+    spotify: socialLinks.spotify || "",
+    website: socialLinks.website || ""
+  };
+}
+
 function SettingsPage({ notify }) {
   const auth = useAuth();
   const { user } = auth;
@@ -5353,26 +5375,16 @@ function SettingsPage({ notify }) {
     { name: "Pro", value: "pro", price: "7.99 EUR", locked: true, features: ["Unlimited releases", "Advanced analytics", "Fast payout queue"] },
     { name: "Label", value: "label", price: "29 EUR", locked: true, features: ["Multiple artists", "Client portal", "Priority support"] }
   ];
-  const [selected] = useState(subscriptionValue(user));
-  const socialLinks = (() => { try { return JSON.parse(user?.social_links || "{}"); } catch { return {}; } })();
-  const [profile, setProfile] = useState(() => ({
-    name: user?.name || "",
-    email: user?.email || "",
-    location: user?.location || "",
-    genre: user?.genre || "Tech House",
-    bio: user?.bio || "",
-    avatar_url: user?.avatar_url || "",
-    logo_url: user?.logo_url || "",
-    banner_url: user?.banner_url || "",
-    artist_slug: user?.artist_slug || "",
-    workspace_visibility: user?.workspace_visibility || "public",
-    instagram: socialLinks.instagram || "",
-    soundcloud: socialLinks.soundcloud || "",
-    spotify: socialLinks.spotify || "",
-    website: socialLinks.website || ""
-  }));
+  const selected = subscriptionValue(user);
+  const [profile, setProfile] = useState(() => settingsProfileFromUser(user));
   const [logoFile, setLogoFile] = useState(null);
   const [bannerFile, setBannerFile] = useState(null);
+
+  useEffect(() => {
+    if (user) setProfile(settingsProfileFromUser(user));
+  }, [user]);
+
+  if (auth.loading) return <main className="page"><SkeletonList /></main>;
   if (!user) return <AuthRequired />;
   const updateProfile = (key, value) => setProfile((current) => ({ ...current, [key]: key === "artist_slug" ? normalizeArtistSlug(value) : value }));
   const profilePreviewUrl = `https://undisc0ver.com/artist/${profile.artist_slug || user.id}`;
