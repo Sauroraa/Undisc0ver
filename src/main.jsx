@@ -4332,75 +4332,174 @@ function ProfileReleaseList({ releases, notify, playRelease }) {
 }
 
 function ReleaseDetail({ id, notify, playRelease }) {
+  const { user } = useAuth();
   const { data, loading, error } = useData(`/releases/${id}`, [id]);
   const [reportOpen, setReportOpen] = useState(false);
   const [waveform, setWaveform] = useState([]);
+  const [playProgress, setPlayProgress] = useState(0);
+  const [showPlaylist, setShowPlaylist] = useState(false);
+  const rafRef = useRef(null);
   const release = data?.release;
+
   useEffect(() => {
     let cancelled = false;
     if (!release) return undefined;
-    audioUrlToWaveform(release.audio_url, 96)
-      .then((bars) => {
-        if (!cancelled) setWaveform(bars.length ? bars : fallbackWaveform(`${release.title}${release.artist}`, 96));
-      })
-      .catch(() => {
-        if (!cancelled) setWaveform(fallbackWaveform(`${release.title}${release.artist}`, 96));
-      });
-    return () => {
-      cancelled = true;
-    };
+    audioUrlToWaveform(release.audio_url, 80)
+      .then((bars) => { if (!cancelled) setWaveform(bars.length ? bars : fallbackWaveform(`${release.title}${release.artist}`, 80)); })
+      .catch(() => { if (!cancelled) setWaveform(fallbackWaveform(`${release.title}${release.artist}`, 80)); });
+    return () => { cancelled = true; };
   }, [release?.id, release?.audio_url]);
+
+  useEffect(() => {
+    const tick = () => {
+      const audio = document.querySelector("audio");
+      if (audio && audio.duration && Number.isFinite(audio.duration)) {
+        setPlayProgress((audio.currentTime / audio.duration) * 100);
+      }
+      rafRef.current = requestAnimationFrame(tick);
+    };
+    rafRef.current = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(rafRef.current);
+  }, []);
+
+  const seekWave = (e) => {
+    const audio = document.querySelector("audio");
+    if (!audio || !audio.duration) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    audio.currentTime = pct * audio.duration;
+  };
+
   if (loading) return <main className="page"><SkeletonList /></main>;
   if (error) return <ErrorPage message={error} />;
-  const waveBars = waveform.length ? waveform : fallbackWaveform(`${release.title}${release.artist}`, 96);
+  const waveBars = waveform.length ? waveform : fallbackWaveform(`${release.title}${release.artist}`, 80);
+  const playedCount = Math.round((playProgress / 100) * waveBars.length);
+  const profileHref = artistPath({ id: release.user_id, artist_slug: release.artist_slug });
+  const shareUrl = `https://undisc0ver.com/release/${release.id}`;
+  const copyLink = () => { navigator.clipboard?.writeText(shareUrl); notify("Lien copié !"); };
+
   return (
-    <main className="page release-detail-page">
-      <section className="release-detail-hero">
-        <div className="release-art-shell">
-          <PackArtwork release={release} large />
-        </div>
-        <div className="release-detail-copy">
-          <p className="label">{release.kind} - {release.genre} - {release.visibility || "public"}</p>
-          <h1>{release.title}</h1>
-          <p className="muted">By <a href={artistPath({ id: release.user_id, artist_slug: release.artist_slug })}>{release.artist}</a> - {release.tracks} track(s) - {release.duration}</p>
-          <div className="profile-badges release-artist-badges">
-            <span className={`badge plan-${subscriptionValue({ plan: release.artist_plan, pro: release.pro })}`}>{subscriptionLabel({ plan: release.artist_plan, pro: release.pro })}</span>
-            {release.verified ? <span className="badge accent">Verified artist</span> : null}
-            {staffRoleLabel(release.artist_role) ? <span className="badge role-badge">{staffRoleLabel(release.artist_role)}</span> : null}
+    <main className="rd-page">
+      {/* ── TOP: cover + waveform + actions ── */}
+      <div className="rd-top">
+        <div className="rd-cover-col">
+          <div className="rd-cover">
+            <PackArtwork release={release} large />
           </div>
-          <div className="release-hero-actions">
-            <button className="button accent" type="button" onClick={() => playRelease(release)}><Play size={16} fill="currentColor" /> Play</button>
+        </div>
+
+        <div className="rd-main-col">
+          {/* Title block */}
+          <div className="rd-header">
+            <div className="rd-meta">
+              <span className="label">{release.kind} · {release.genre}</span>
+              <div className="rd-badges">
+                <span className={`badge plan-${subscriptionValue({ plan: release.artist_plan, pro: release.pro })}`}>{subscriptionLabel({ plan: release.artist_plan, pro: release.pro })}</span>
+                {release.verified ? <span className="badge accent">Vérifié</span> : null}
+              </div>
+            </div>
+            <h1 className="rd-title">{release.title}</h1>
+            <a href={profileHref} className="rd-artist">
+              <span className="avatar sm">{release.avatar_url || release.logo_url ? <img src={release.avatar_url || release.logo_url} alt="" /> : (release.avatar || release.artist?.[0])}</span>
+              {release.artist}
+            </a>
+          </div>
+
+          {/* Waveform interactive */}
+          <div className="rd-wave-wrap" onClick={seekWave} title="Cliquer pour naviguer">
+            <div className="rd-wave">
+              {waveBars.map((h, i) => (
+                <i key={i} className={i < playedCount ? "played" : ""} style={{ height: `${h}px` }} />
+              ))}
+            </div>
+            <div className="rd-wave-cursor" style={{ left: `${playProgress}%` }} />
+          </div>
+          <div className="rd-wave-times">
+            <span>{formatDuration(Math.round((playProgress / 100) * (parseDurationSeconds(release.duration) || 0)))}</span>
+            <span>{release.duration}</span>
+          </div>
+
+          {/* Main actions */}
+          <div className="rd-actions">
+            <button className="rd-play-btn" onClick={() => playRelease(release)} aria-label="Play">
+              <Play size={18} fill="currentColor" />
+            </button>
             <LikeButton release={release} notify={notify} />
-            {release.free ? <ReleaseDownloadGate release={release} notify={notify} /> : <BuyButton release={release} notify={notify} />}
-            <button className="button ghost" type="button" onClick={() => setReportOpen((value) => !value)}><ShieldAlert size={16} /> Report</button>
+            <RepostButton releaseId={release.id} notify={notify} />
+            <button className="button ghost rd-action-btn" onClick={() => { if (!user) { navigate("/auth"); return; } setShowPlaylist((v) => !v); }} title="Ajouter à une playlist">
+              <Plus size={15} /> Playlist
+            </button>
+            <button className="button ghost rd-action-btn" onClick={copyLink}><Copy size={15} /> Partager</button>
+            <button className="button ghost rd-action-btn icon-only" onClick={() => setReportOpen((v) => !v)} title="Signaler"><ShieldAlert size={15} /></button>
           </div>
-          <div className="release-hero-wave" aria-label="Audio waveform">
-            {waveBars.map((height, index) => <i key={index} style={{ height: `${height}px` }} />)}
+
+          {showPlaylist && <QuickAddToPlaylist releaseId={release.id} notify={notify} onClose={() => setShowPlaylist(false)} />}
+
+          {/* Download / Buy */}
+          <div className="rd-download-zone">
+            {release.free
+              ? <ReleaseDownloadGate release={release} notify={notify} />
+              : (
+                <div className="rd-buy-block">
+                  <div className="rd-buy-info">
+                    <ShieldCheck size={16} />
+                    <span>Release payante · accès complet après achat</span>
+                    <strong>{money(release.price_cents)}</strong>
+                  </div>
+                  <BuyButton release={release} notify={notify} />
+                </div>
+              )}
           </div>
-          <div className="music-time release-wave-time"><span>0:00</span><span>{release.duration}</span></div>
-          <div className="release-share-line">
-            <span>https://undisc0ver.com/release/{release.id}</span>
-            <button className="button ghost" type="button" onClick={() => navigator.clipboard?.writeText(`https://undisc0ver.com/release/${release.id}`)}><Copy size={15} /> Copy link</button>
+
+          {/* Stats chips */}
+          <div className="rd-stats-row">
+            <span><Play size={12} /> {shortNumber(release.plays)} plays</span>
+            <span><ArrowDownToLine size={12} /> {shortNumber(release.downloads)} DL</span>
+            <span><Heart size={12} /> {release.likes} likes</span>
+            <span><MessageCircle size={12} /> {data.comments?.length || 0} comments</span>
           </div>
         </div>
-      </section>
-      <section className="release-detail-body">
-        <div className="release-main-column">
-          <article className="release-about-card">
-            <span className="label">About this drop</span>
-            <p>{release.description || "No description yet."}</p>
-          </article>
-          <div className="stats card-stats release-stat-grid">
-            <b>{shortNumber(release.plays)}<span>plays</span></b>
-            <b>{shortNumber(release.downloads)}<span>downloads</span></b>
-            <b>{shortNumber(release.sales || 0)}<span>sales</span></b>
-            <b>{release.likes}<span>likes</span></b>
-          </div>
+      </div>
+
+      {/* ── BODY: description + comments ── */}
+      <div className="rd-body">
+        <div className="rd-about">
+          {release.description && (
+            <section className="rd-desc-card">
+              <span className="label">À propos</span>
+              <p>{release.description}</p>
+            </section>
+          )}
           {reportOpen && <TakedownReportForm release={release} notify={notify} />}
+          <div className="rd-share-row">
+            <span className="rd-share-url">{shareUrl}</span>
+            <button className="button ghost" onClick={copyLink}><Copy size={14} /> Copier</button>
+          </div>
         </div>
+
         <ReleaseComments release={release} initialComments={data.comments || []} notify={notify} />
-      </section>
+      </div>
     </main>
+  );
+}
+
+function QuickAddToPlaylist({ releaseId, notify, onClose }) {
+  const { data } = useData("/playlists", []);
+  const playlists = data?.playlists || [];
+  const add = async (playlistId) => {
+    try {
+      await request(`/playlists/${playlistId}/tracks`, { method: "POST", body: JSON.stringify({ releaseId }) });
+      notify("Ajouté à la playlist !");
+      onClose();
+    } catch (err) { notify(err.message); }
+  };
+  return (
+    <div className="quick-playlist-popup">
+      <div className="quick-playlist-head"><span>Ajouter à une playlist</span><button onClick={onClose}><X size={14} /></button></div>
+      {playlists.length === 0
+        ? <p className="muted" style={{ padding: "0.75rem 1rem" }}>Aucune playlist. <a href="/playlists">En créer une</a></p>
+        : playlists.map((pl) => <button key={pl.id} onClick={() => add(pl.id)}><Music2 size={13} /> {pl.title}</button>)}
+    </div>
   );
 }
 
@@ -4408,30 +4507,68 @@ function ReleaseComments({ release, initialComments, notify }) {
   const { user } = useAuth();
   const [comments, setComments] = useState(initialComments);
   const [body, setBody] = useState("");
+  const [sending, setSending] = useState(false);
+  const textareaRef = useRef(null);
+
   const submit = async (event) => {
     event.preventDefault();
-    if (!user) return navigate("/login");
-    await request(`/releases/${release.id}/comments`, { method: "POST", body: JSON.stringify({ body }) });
-    setComments([{ id: `local-${Date.now()}`, body, name: user.name, avatar: user.avatar, avatar_url: user.avatar_url, created_at: new Date().toISOString() }, ...comments]);
-    setBody("");
-    notify("Comment added.");
+    if (!user) return navigate("/auth");
+    if (!body.trim()) return;
+    setSending(true);
+    try {
+      await request(`/releases/${release.id}/comments`, { method: "POST", body: JSON.stringify({ body }) });
+      setComments([{ id: `local-${Date.now()}`, body, name: user.name, avatar: user.avatar, avatar_url: user.avatar_url, created_at: new Date().toISOString() }, ...comments]);
+      setBody("");
+    } catch (err) { notify(err.message); }
+    finally { setSending(false); }
   };
+
+  const timeAgo = (dateStr) => {
+    const ms = Date.now() - new Date(dateStr).getTime();
+    if (ms < 60_000) return "à l'instant";
+    if (ms < 3_600_000) return `${Math.floor(ms / 60_000)}m`;
+    if (ms < 86_400_000) return `${Math.floor(ms / 3_600_000)}h`;
+    return `${Math.floor(ms / 86_400_000)}j`;
+  };
+
   return (
-    <aside className="release-comments-card">
-      <h2>Comments</h2>
-      <form onSubmit={submit}>
-        <textarea value={body} onChange={(e) => setBody(e.target.value)} placeholder="Write a comment..." />
-        <button className="button accent" type="submit"><MessageCircle size={16} /> Comment</button>
-      </form>
-      <div className="release-comment-list">
-        {comments.length ? comments.map((comment) => (
-          <article key={comment.id}>
-            <span className="avatar">{comment.avatar || initials(comment.name)}</span>
-            <div><strong>{comment.name}</strong><p>{comment.body}</p></div>
+    <section className="rd-comments">
+      <h2 className="rd-comments-title"><MessageCircle size={18} /> Commentaires <span>{comments.length}</span></h2>
+
+      {user ? (
+        <form className="rd-comment-form" onSubmit={submit}>
+          <span className="avatar sm">{user.avatar_url ? <img src={user.avatar_url} alt="" /> : (user.avatar || user.name?.[0])}</span>
+          <div className="rd-comment-input-wrap">
+            <textarea
+              ref={textareaRef}
+              value={body}
+              onChange={(e) => setBody(e.target.value)}
+              placeholder="Laisse un commentaire…"
+              rows={2}
+              onKeyDown={(e) => { if (e.key === "Enter" && e.metaKey) submit(e); }}
+            />
+            <button className="button accent" type="submit" disabled={sending || !body.trim()}>
+              {sending ? <Loader2 className="spin" size={14} /> : <ArrowUpRight size={14} />}
+            </button>
+          </div>
+        </form>
+      ) : (
+        <a href="/auth" className="rd-comment-login"><MessageCircle size={14} /> Connecte-toi pour commenter</a>
+      )}
+
+      <div className="rd-comment-list">
+        {comments.length === 0 && <p className="rd-no-comments">Sois le premier à commenter.</p>}
+        {comments.map((c) => (
+          <article key={c.id} className="rd-comment">
+            <span className="avatar sm">{c.avatar_url ? <img src={c.avatar_url} alt="" onError={(e) => { e.currentTarget.style.display = "none"; }} /> : (c.avatar || c.name?.[0] || "?")}</span>
+            <div className="rd-comment-body">
+              <div className="rd-comment-meta"><strong>{c.name}</strong><time>{timeAgo(c.created_at)}</time></div>
+              <p>{c.body}</p>
+            </div>
           </article>
-        )) : <p className="muted">No comments yet.</p>}
+        ))}
       </div>
-    </aside>
+    </section>
   );
 }
 
