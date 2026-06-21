@@ -1410,8 +1410,9 @@ function AuthProvider({ children }) {
     }
   }), [user, loading]);
 
-  // Expose auth ctx to dashboards.jsx (separate file, no AuthContext import available there)
-  useEffect(() => { window.__undiscover_auth_ctx = value; }, [value]);
+  // dashboards.jsx is a separate module and reads this bridge during its render.
+  // Keep it synchronous so direct dashboard URLs see the restored session immediately.
+  window.__undiscover_auth_ctx = value;
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
