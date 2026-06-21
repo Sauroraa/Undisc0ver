@@ -8,6 +8,14 @@ import { createReadStream, existsSync, mkdirSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { db, hashPassword, id, initDb, publicUser, verifyPassword } from "./db.js";
+import {
+  passwordResetEmail, welcomeEmail, purchaseConfirmationEmail,
+  bookingRequestEmail, supportTicketEmail, copyrightNoticeEmail,
+  downloadReceiptEmail, staffTicketReplyEmail
+} from "./emails.js";
+import { campaignsRouter, fulfillCampaignCheckout } from "./campaigns.js";
+import { computeFinalScore, organicScore, freshnessScore } from "./scoring.js";
+import { dashboardsRouter } from "./dashboards.js";
 
 initDb();
 
@@ -455,6 +463,21 @@ function writeAudit(actorId, action, entityType, entityId = "", details = "") {
     .run(id("log"), actorId || null, action, entityType, entityId, String(details || "").slice(0, 1000));
 }
 
+function securityLog({ userId = null, action, entityType = "", entityId = "", req = null, details = {}, severity = "info" }) {
+  try {
+    const ip = req ? String(req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "") : "";
+    const ipHash = ip ? crypto.createHash("sha256").update(ip).digest("hex").slice(0, 16) : "";
+    const ua = req ? String(req.headers["user-agent"] || "").slice(0, 255) : "";
+    db.prepare("INSERT INTO security_logs (id, user_id, action, entity_type, entity_id, ip_hash, user_agent, details, severity) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+      .run(id("sec"), userId || null, action, entityType, entityId, ipHash, ua, JSON.stringify(details), severity);
+  } catch { /* Non-blocking — never crash the request */ }
+}
+
+function ipHash(req) {
+  const ip = String(req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "");
+  return ip ? crypto.createHash("sha256").update(ip).digest("hex").slice(0, 16) : "";
+}
+
 function normalizeArtistSlug(value = "") {
   return String(value)
     .trim()
@@ -491,7 +514,10 @@ app.post("/api/auth/register", rateLimiter(10, 15 * 60_000), (req, res) => {
       .run(userId, name, email.toLowerCase(), hashPassword(password), initials || "U0", genre, "Nouvel artiste Undiscover.", "free", 0);
     const token = id("tok");
     db.prepare("INSERT INTO sessions (token, user_id) VALUES (?, ?)").run(token, userId);
-    res.json({ token, user: publicUser(db.prepare("SELECT * FROM users WHERE id = ?").get(userId)) });
+    const newUser = publicUser(db.prepare("SELECT * FROM users WHERE id = ?").get(userId));
+    const welcomeEmailContent = welcomeEmail({ name });
+    sendEmail({ to: email.toLowerCase(), ...welcomeEmailContent }).catch(() => {});
+    res.json({ token, user: newUser });
   } catch {
     res.status(409).json({ error: "Cet email existe deja." });
   }
@@ -788,15 +814,17 @@ app.post("/api/releases/:id/report", rateLimiter(5, 60 * 60_000), (req, res) => 
     .run(id("td"), req.params.id, reporter_name, reporter_email, rights_owner, reason, evidence_url);
   db.prepare("UPDATE releases SET takedown_count = takedown_count + 1, moderation_status = 'review', scan_status = 'review', scan_notes = ? WHERE id = ?")
     .run("Copyright report received. Release moved to review until moderation resolves the claim.", req.params.id);
-  res.json({ ok: true, status: "review", message: "Signalement recu. La release est placee en review." });
+  securityLog({ action: "copyright_report", entityType: "release", entityId: req.params.id, req, severity: "warning", details: { reporter_email, rights_owner } });
+  // Notify the artist
+  const targetRelease = db.prepare("SELECT r.title, u.email, u.name FROM releases r JOIN users u ON u.id = r.user_id WHERE r.id = ?").get(req.params.id);
+  if (targetRelease?.email) {
+    const noticeEmail = copyrightNoticeEmail({ name: targetRelease.name, email: targetRelease.email }, { releaseTitle: targetRelease.title, releaseId: req.params.id, reason });
+    sendEmail({ to: targetRelease.email, ...noticeEmail }).catch(() => {});
+  }
+  res.json({ ok: true, status: "review", message: "Signalement reçu. La release est placée en review." });
 });
 
-app.post("/api/releases/:id/like", auth, (req, res) => {
-  const liked = db.prepare("SELECT 1 FROM likes WHERE user_id = ? AND release_id = ?").get(req.user.id, req.params.id);
-  if (liked) db.prepare("DELETE FROM likes WHERE user_id = ? AND release_id = ?").run(req.user.id, req.params.id);
-  else db.prepare("INSERT INTO likes (user_id, release_id) VALUES (?, ?)").run(req.user.id, req.params.id);
-  res.json({ liked: !liked, likes: db.prepare("SELECT COUNT(*) total FROM likes WHERE release_id = ?").get(req.params.id).total });
-});
+// Like route with notifications defined below (line ~1870)
 
 app.post("/api/releases/:id/comments", auth, (req, res) => {
   const release = db.prepare("SELECT * FROM releases WHERE id = ? AND moderation_status = 'published' AND (visibility != 'private' OR user_id = ?)").get(req.params.id, req.user.id);
@@ -843,27 +871,41 @@ app.get("/api/discover", (req, res) => {
   const artistIds = new Set(affinity.map((row) => row.user_id));
   const recentlyHeardIds = new Set(recent.map((item) => item.id));
 
-  // Score-ranked recommendations — query in DB, limit to 80 candidates to avoid full scan
+  // Score-ranked recommendations using the full ranking algorithm
   const candidatePool = db.prepare(releaseSelect(
     `WHERE ${publicReleaseWhere("r")}`,
-    "(r.plays * 0.55 + r.downloads * 1.4) DESC"
-  )).all().slice(0, 80);
+    "r.created_at DESC"
+  )).all().slice(0, 120);
 
-  const twoWeeks = 14 * 24 * 60 * 60 * 1000;
-  const now = Date.now();
+  // Pre-fetch active campaigns for candidate releases
+  const activeCampaignsAll = db.prepare(`
+    SELECT pc.release_id, pc.daily_budget_cents, pc.quality_score, pc.campaign_type
+    FROM promotion_campaigns pc
+    WHERE pc.status = 'active' AND datetime(pc.ends_at) >= datetime('now') AND pc.release_id IS NOT NULL
+  `).all();
+  const campaignsByRelease = {};
+  for (const c of activeCampaignsAll) {
+    if (!campaignsByRelease[c.release_id]) campaignsByRelease[c.release_id] = [];
+    campaignsByRelease[c.release_id].push(c);
+  }
+
+  const userAffinity = { genres, artistIds };
+  const seenArtistIds = new Set();
   const recommended = candidatePool
     .filter((r) => !recentlyHeardIds.has(r.id))
     .map((r) => ({
       ...r,
-      recommendation_score:
-        Number(r.plays || 0) * 0.55 +
-        Number(r.downloads || 0) * 1.4 +
-        Number(r.likes || 0) * 4 +
-        (genres.has(r.genre) ? 90 : 0) +
-        (artistIds.has(r.user_id) ? 70 : 0) +
-        (now - new Date(r.created_at).getTime() < twoWeeks ? 35 : 0)
+      recommendation_score: computeFinalScore(r, {
+        page: "discovery",
+        userAffinity,
+        activeCampaigns: campaignsByRelease[r.id] || [],
+        seenArtistIds,
+        seenCountThisSession: 0,
+      })
     }))
     .sort((a, b) => b.recommendation_score - a.recommendation_score)
+    .slice(0, 20)
+    .filter((r) => { seenArtistIds.add(r.user_id); return true; })
     .slice(0, 16);
 
   const newReleases = db.prepare(releaseSelect(
@@ -986,17 +1028,57 @@ app.post("/api/releases/:id/gate-action", auth, (req, res) => {
   res.json({ required, done, unlocked: required.every((item) => done.includes(item)) });
 });
 
-app.post("/api/releases/:id/download", auth, (req, res) => {
+app.post("/api/releases/:id/download", auth, rateLimiter(10, 60_000), (req, res) => {
   const release = db.prepare("SELECT * FROM releases WHERE id = ? AND moderation_status = 'published' AND (visibility != 'private' OR user_id = ?)").get(req.params.id, req.user.id);
   if (!release) return res.status(404).json({ error: "Release introuvable." });
-  if (!release.download_enabled) return res.status(403).json({ error: "Le telechargement est desactive pour cette release." });
-  const required = requiredGateActions(release);
-  const done = db.prepare("SELECT action FROM release_gate_actions WHERE user_id = ? AND release_id = ?").all(req.user.id, req.params.id).map((row) => row.action);
-  const missing = required.filter((action) => !done.includes(action));
-  if (missing.length) return res.status(403).json({ error: "Complete les actions du download gate avant de telecharger.", missing });
+  if (!release.download_enabled) return res.status(403).json({ error: "Le téléchargement est désactivé pour cette release." });
+
+  const isOwner = req.user.id === release.user_id;
+  const isStaff = ["staff", "moderator", "admin"].includes(req.user.role);
+
+  // ── Paid content: verify purchase ──────────────────────────────────────────
+  if (!release.free && release.price_cents > 0 && !isOwner && !isStaff) {
+    const purchase = db.prepare("SELECT id FROM purchases WHERE user_id = ? AND release_id = ?").get(req.user.id, req.params.id);
+    if (!purchase) {
+      securityLog({ userId: req.user.id, action: "download_unauthorized", entityType: "release", entityId: req.params.id, req, severity: "warning", details: { price_cents: release.price_cents } });
+      return res.status(402).json({ error: "Achat requis pour télécharger ce contenu.", requires_purchase: true, release_id: req.params.id });
+    }
+
+    // Enforce per-purchase download limit
+    const downloadLimit = Number(release.download_limit || 3);
+    const dlCount = db.prepare("SELECT COUNT(*) total FROM download_logs WHERE user_id = ? AND release_id = ?").get(req.user.id, req.params.id).total;
+    if (dlCount >= downloadLimit) {
+      securityLog({ userId: req.user.id, action: "download_limit_exceeded", entityType: "release", entityId: req.params.id, req, severity: "warning", details: { count: dlCount, limit: downloadLimit } });
+      return res.status(429).json({ error: `Limite de téléchargements atteinte (${downloadLimit} max). Contacte le support si besoin.` });
+    }
+  }
+
+  // ── Free content: verify gate actions ─────────────────────────────────────
+  if ((release.free || release.price_cents === 0) && !isOwner && !isStaff) {
+    const required = requiredGateActions(release);
+    const done = db.prepare("SELECT action FROM release_gate_actions WHERE user_id = ? AND release_id = ?").all(req.user.id, req.params.id).map((row) => row.action);
+    const missing = required.filter((action) => !done.includes(action));
+    if (missing.length) return res.status(403).json({ error: "Complete les actions du download gate avant de télécharger.", missing });
+  }
+
+  // ── Watermark ID — unique per download for leak tracing ───────────────────
+  const watermarkId = id("wm");
+  const purchase = db.prepare("SELECT id FROM purchases WHERE user_id = ? AND release_id = ?").get(req.user.id, req.params.id);
+
+  // Log the download for traceability
+  db.prepare("INSERT INTO download_logs (id, user_id, release_id, token_id, ip_hash, user_agent, watermark_id) VALUES (?, ?, ?, NULL, ?, ?, ?)")
+    .run(id("dl"), req.user.id, req.params.id, ipHash(req), String(req.headers["user-agent"] || "").slice(0, 255), watermarkId);
+
   db.prepare("UPDATE releases SET downloads = downloads + 1 WHERE id = ?").run(req.params.id);
+
   const storageName = storageNameFromAudioUrl(release.audio_url);
-  streamAudioFile(req, res, safeUploadPath(storageName), {
+  const filePath = safeUploadPath(storageName);
+  if (!filePath) return res.status(404).json({ error: "Fichier audio introuvable." });
+
+  // Inject watermark as custom header so the client knows the trace ID
+  res.setHeader("X-Watermark-Id", watermarkId);
+  res.setHeader("X-Download-User", req.user.id);
+  streamAudioFile(req, res, filePath, {
     mime: release.audio_mime || "application/octet-stream",
     fileName: release.audio_file_name || `${release.title}.wav`,
     preview: false
@@ -1006,10 +1088,19 @@ app.post("/api/releases/:id/download", auth, (req, res) => {
 app.post("/api/releases/:id/buy", auth, (req, res) => {
   const release = db.prepare("SELECT * FROM releases WHERE id = ? AND moderation_status = 'published' AND (visibility != 'private' OR user_id = ?)").get(req.params.id, req.user.id);
   if (!release) return res.status(404).json({ error: "Release introuvable." });
-  const amount = release.price_cents || 0;
-  db.prepare("INSERT INTO purchases (id, user_id, release_id, amount_cents) VALUES (?, ?, ?, ?)").run(id("pur"), req.user.id, req.params.id, amount);
-  db.prepare("UPDATE releases SET sales = sales + 1, revenue_cents = revenue_cents + ? WHERE id = ?").run(amount, req.params.id);
-  res.json({ ok: true, amount_cents: amount });
+
+  // Paid tracks MUST go through Stripe — never trust this endpoint for payment
+  if (!release.free && release.price_cents > 0) {
+    securityLog({ userId: req.user.id, action: "buy_bypass_attempt", entityType: "release", entityId: req.params.id, req, severity: "warning", details: { price_cents: release.price_cents } });
+    return res.status(402).json({ error: "Ce contenu est payant. Utilise le checkout sécurisé.", requires_checkout: true });
+  }
+
+  // Free track — record $0 acquisition (idempotent)
+  const existing = db.prepare("SELECT id FROM purchases WHERE user_id = ? AND release_id = ?").get(req.user.id, req.params.id);
+  if (!existing) {
+    db.prepare("INSERT INTO purchases (id, user_id, release_id, amount_cents) VALUES (?, ?, ?, 0)").run(id("pur"), req.user.id, req.params.id);
+  }
+  res.json({ ok: true, amount_cents: 0 });
 });
 
 app.get("/api/artists", (req, res) => {
@@ -1186,6 +1277,10 @@ app.post("/api/support/tickets", rateLimiter(5, 60 * 60_000), (req, res) => {
     .run(ticketId, userId || null, name, email, topic, message);
   db.prepare("INSERT INTO ticket_messages (id, ticket_id, sender_id, sender_type, body) VALUES (?, ?, ?, 'user', ?)").run(id("msg"), ticketId, userId || null, message);
   db.prepare("INSERT INTO ticket_messages (id, ticket_id, sender_type, body) VALUES (?, ?, 'system', ?)").run(id("msg"), ticketId, "Demande reçue. Un membre de l'équipe Undiscover te répondra ici dès que possible.");
+  // Confirmation email to requester
+  const ticketUser = userId ? db.prepare("SELECT * FROM users WHERE id = ?").get(userId) : null;
+  const ticketEmailContent = supportTicketEmail(ticketUser || { name }, { id: ticketId, topic });
+  sendEmail({ to: email, ...ticketEmailContent }).catch(() => {});
   res.json({ ok: true, ticket: { id: ticketId, status: "open" } });
 });
 
@@ -1362,6 +1457,9 @@ app.post("/api/staff/tickets/:id/reply", staffAuth, (req, res) => {
   db.prepare("UPDATE support_tickets SET status = 'pending', assignee_role = ? WHERE id = ?").run(req.user.role, ticket.id);
   if (ticket.user_id) db.prepare("INSERT INTO notifications (id, user_id, type, body) VALUES (?, ?, 'support', ?)").run(id("ntf"), ticket.user_id, `Nouvelle réponse du support: ${body.slice(0, 120)}`);
   writeAudit(req.user.id, "ticket.reply", "ticket", ticket.id, body.slice(0, 200));
+  // Email the requester with the staff reply
+  const replyEmailContent = staffTicketReplyEmail(ticket.user_id ? db.prepare("SELECT * FROM users WHERE id = ?").get(ticket.user_id) : { name: ticket.name }, ticket, body);
+  sendEmail({ to: ticket.email, ...replyEmailContent }).catch(() => {});
   res.json({ ok: true });
 });
 
@@ -1584,11 +1682,8 @@ app.post("/api/auth/forgot-password", rateLimiter(5, 60 * 60_000), async (req, r
   db.prepare("INSERT INTO password_resets (id, user_id, token_hash, expires_at) VALUES (?, ?, ?, datetime('now', '+1 hour'))")
     .run(id("rst"), user.id, tokenHash);
   const resetUrl = `${siteUrl}/reset-password?token=${rawToken}`;
-  await sendEmail({
-    to: user.email,
-    subject: "Réinitialisation de ton mot de passe Undisc0ver",
-    html: `<p>Bonjour ${user.name},</p><p>Clique sur ce lien pour réinitialiser ton mot de passe :</p><p><a href="${resetUrl}">${resetUrl}</a></p><p>Ce lien expire dans 1 heure.</p><p>Si tu n'as pas demandé cette réinitialisation, ignore cet email.</p>`
-  });
+  const resetEmailContent = passwordResetEmail(user, resetUrl);
+  await sendEmail({ to: user.email, ...resetEmailContent });
   res.json({ ok: true });
 });
 
@@ -1612,13 +1707,22 @@ function fulfillStripeCheckout(session) {
   if (chk?.status === "pending") {
     db.prepare("UPDATE stripe_checkouts SET status = 'paid' WHERE id = ?").run(chk.id);
     if (chk.release_id) {
-      const release = db.prepare("SELECT price_cents FROM releases WHERE id = ?").get(chk.release_id);
+      const release = db.prepare("SELECT * FROM releases WHERE id = ?").get(chk.release_id);
       const amount = release?.price_cents || chk.amount_cents;
       db.prepare("INSERT OR IGNORE INTO purchases (id, user_id, release_id, amount_cents) VALUES (?, ?, ?, ?)").run(id("pur"), chk.user_id, chk.release_id, amount);
       db.prepare("UPDATE releases SET sales = sales + 1, revenue_cents = revenue_cents + ? WHERE id = ?").run(amount, chk.release_id);
+      // Send purchase confirmation email (non-blocking)
+      if (release && amount > 0) {
+        const buyer = db.prepare("SELECT id, name, email FROM users WHERE id = ?").get(chk.user_id);
+        if (buyer) {
+          const confirmEmailContent = purchaseConfirmationEmail(buyer, release, amount);
+          sendEmail({ to: buyer.email, ...confirmEmailContent }).catch(() => {});
+        }
+      }
     }
     if (chk.campaign_id) {
-      db.prepare("UPDATE promotion_campaigns SET status = 'active', starts_at = CURRENT_TIMESTAMP, ends_at = datetime('now', '+' || days || ' days') WHERE id = ? AND status = 'pending'").run(chk.campaign_id);
+      // Delegate to campaigns module (handles review flow, notifications, quality scoring)
+      try { fulfillCampaignCheckout({ id: session.id, metadata: { campaign_id: chk.campaign_id } }); } catch { /* non-blocking */ }
     }
   }
   if (meta.type === "subscription" && meta.plan && meta.user_id) {
@@ -1896,11 +2000,8 @@ app.post("/api/artists/:id/booking", rateLimiter(5, 60 * 60_000), async (req, re
   const bookingId = id("bkn");
   db.prepare("INSERT INTO booking_requests (id, artist_id, requester_name, requester_email, event_date, event_type, message) VALUES (?, ?, ?, ?, ?, ?, ?)")
     .run(bookingId, artist.id, requesterName, requesterEmail, eventDate, eventType, message);
-  await sendEmail({
-    to: artist.email,
-    subject: `Nouvelle demande de booking — ${requesterName}`,
-    html: `<p><strong>${requesterName}</strong> (${requesterEmail}) t'envoie une demande de booking.</p><p><strong>Date :</strong> ${eventDate || "À définir"}</p><p><strong>Type :</strong> ${eventType || "Non précisé"}</p><p><strong>Message :</strong><br/>${message}</p>`
-  });
+  const bookingEmailContent = bookingRequestEmail(artist, { requesterName, requesterEmail, eventDate, eventType, message });
+  await sendEmail({ to: artist.email, ...bookingEmailContent });
   db.prepare("INSERT INTO notifications (id, user_id, type, body) VALUES (?, ?, 'booking', ?)")
     .run(id("ntf"), artist.id, `Nouvelle demande de booking de ${requesterName}`);
   res.json({ ok: true, booking_id: bookingId });
@@ -1942,6 +2043,12 @@ app.use((err, _req, res, next) => {
   }
   return res.status(400).json({ error: err.message || "Erreur serveur." });
 });
+
+// ── Campaign system router ──────────────────────────────────────────────────
+app.use("/api/campaigns", campaignsRouter);
+
+// ── Role-based dashboard API ─────────────────────────────────────────────────
+app.use("/api/dashboards", dashboardsRouter);
 
 if (process.env.NODE_ENV === "production" && existsSync(distDir)) {
   app.use(express.static(distDir));

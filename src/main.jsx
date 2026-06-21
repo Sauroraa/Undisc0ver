@@ -60,6 +60,7 @@ import {
   Sparkles,
   SquareArrowOutUpRight,
   Tag,
+  Target,
   Trash,
   Twitter,
   Upload,
@@ -73,6 +74,7 @@ import {
 } from "lucide-react";
 import { AnimatePresence, motion, useScroll, useTransform } from "framer-motion";
 import "./styles.css";
+import { UserDashboard, ProDashboard, StaffDashboard, ModeratorDashboard, AdminDashboard } from "./dashboards.jsx";
 
 const API = "/api";
 const AuthContext = createContext(null);
@@ -1398,6 +1400,9 @@ function AuthProvider({ children }) {
       navigate("/");
     }
   }), [user, loading]);
+
+  // Expose auth ctx to dashboards.jsx (separate file, no AuthContext import available there)
+  useEffect(() => { window.__undiscover_auth_ctx = value; }, [value]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
@@ -2867,6 +2872,17 @@ function CrateDropSection({ notify, playRelease }) {
   );
 }
 
+function SmartDashboard({ notify, playRelease }) {
+  const { user, loading } = useAuth();
+  if (loading) return <main className="page"><div className="db-loading"><Loader2 className="spin" size={28} /></div></main>;
+  if (!user) return <AuthPage mode="login" notify={notify} />;
+  if (user.role === "admin") return <AdminDashboard notify={notify} />;
+  if (user.role === "moderator") return <ModeratorDashboard notify={notify} />;
+  if (user.role === "staff") return <StaffDashboard notify={notify} />;
+  if (user.pro || user.role === "label" || user.plan === "pro") return <ProDashboard notify={notify} playRelease={playRelease} />;
+  return <UserDashboard notify={notify} playRelease={playRelease} />;
+}
+
 function renderRoute(route, notify, playRelease) {
   const [path, query] = route.split("?");
   if (path === "/") return <Home notify={notify} playRelease={playRelease} />;
@@ -2895,7 +2911,12 @@ function renderRoute(route, notify, playRelease) {
   if (path === "/acceptable-use") return <AcceptableUsePage />;
   if (path === "/careers") return <CareersPage />;
   if (path === "/staff") return <StaffPanel notify={notify} query={query} />;
-  if (path === "/dashboard") return <Dashboard notify={notify} playRelease={playRelease} section="overview" />;
+  // Role-based dashboard routing (server enforces access, frontend dispatches by role)
+  if (path === "/dashboard") return <SmartDashboard notify={notify} playRelease={playRelease} />;
+  if (path === "/dashboard/pro") return <ProDashboard notify={notify} playRelease={playRelease} />;
+  if (path === "/staff-dashboard") return <StaffDashboard notify={notify} />;
+  if (path === "/mod-dashboard") return <ModeratorDashboard notify={notify} />;
+  if (path === "/admin-dashboard") return <AdminDashboard notify={notify} />;
   if (path === "/catalog") return <Dashboard notify={notify} playRelease={playRelease} section="catalog" />;
   if (path === "/analytics") return <Dashboard notify={notify} playRelease={playRelease} section="analytics" />;
   if (path === "/payouts") return <Dashboard notify={notify} playRelease={playRelease} section="payouts" />;
@@ -2917,6 +2938,9 @@ function useData(path, deps = []) {
   }, deps);
   return state;
 }
+// Global bridges for dashboards.jsx (separate module)
+window.__undiscover_request = request;
+window.__undiscover_use_data = useData;
 
 function SupportPage({ notify }) {
   const { user } = useAuth();
@@ -4128,24 +4152,30 @@ function MiniReleaseCard({ release, playRelease }) {
 
 function CampaignSpot({ campaign }) {
   useEffect(() => {
-    const key = `undiscover_campaign_impression_${campaign.id}`;
+    const key = `undiscover_ci_${campaign.id}`;
     if (sessionStorage.getItem(key)) return;
     sessionStorage.setItem(key, "1");
-    request(`/campaigns/${campaign.id}/impression`, { method: "POST" }).catch(() => sessionStorage.removeItem(key));
+    request(`/campaigns/track/impression`, { method: "POST", body: JSON.stringify({ campaign_id: campaign.id, placement: campaign.placement || campaign.spot || "discovery" }) }).catch(() => sessionStorage.removeItem(key));
   }, [campaign.id]);
-  const click = () => request(`/campaigns/${campaign.id}/click`, { method: "POST" }).catch(() => {});
-  const href = campaign.release_id ? `/release/${campaign.release_id}` : "/explore";
+  const click = () => request(`/campaigns/track/click`, { method: "POST", body: JSON.stringify({ campaign_id: campaign.id, placement: campaign.placement || campaign.spot || "discovery" }) }).catch(() => {});
+  const href = campaign.release_id ? `/release/${campaign.release_id}` : campaign.url || "/explore";
+  const typeLabels = { boost_lite: "Boost Léger", boost_standard: "Boost", boost_premium: "Premium", launch: "Nouveau", profile_boost: "Artiste", genre_targeted: "Genre Ciblé", retargeting: "Recommandé" };
   return (
-    <a className={`campaign-spot spot-${campaign.spot}`} href={href} onClick={click}>
-      <span>{campaign.image_url ? <img src={campaign.image_url} alt="" /> : <Sparkles size={18} />}</span>
-      <strong>{campaign.title}<small>{campaign.release_title || "Promoted release"}</small></strong>
-      <em>{money(campaign.daily_budget_cents)}/day</em>
+    <a className={`campaign-spot spot-${campaign.spot || campaign.placement}`} href={href} onClick={click}>
+      {campaign.image_url || campaign.release_cover_url
+        ? <img src={campaign.image_url || campaign.release_cover_url} alt="" className="campaign-spot-img" />
+        : <span className="campaign-spot-icon"><Sparkles size={18} /></span>}
+      <div className="campaign-spot-body">
+        <strong>{campaign.title || campaign.release_title}</strong>
+        {campaign.artist_name && <small>{campaign.artist_name}</small>}
+      </div>
+      <span className="campaign-spot-badge">{typeLabels[campaign.campaign_type] || "Sponsorisé"}</span>
     </a>
   );
 }
 
 function CampaignPlacement({ spot, title }) {
-  const { data, loading } = useData(`/campaigns?spot=${spot}`, [spot]);
+  const { data, loading } = useData(`/campaigns/active/${spot}`, [spot]);
   const campaigns = data?.campaigns || [];
   if (loading || !campaigns.length) return null;
   return (
@@ -5827,134 +5857,350 @@ function TestimonialEditor({ user, notify }) {
   );
 }
 
-function CampaignManager({ releases, notify }) {
-  const eligibleReleases = releases.filter((release) => release.moderation_status === "published" && release.visibility === "public");
-  const [refreshKey, setRefreshKey] = useState(0);
-  const { data, loading } = useData("/me/campaigns", [refreshKey]);
-  const [form, setForm] = useState({
-    release_id: eligibleReleases[0]?.id || "",
-    title: eligibleReleases[0]?.title || "",
-    image_url: eligibleReleases[0]?.cover_url || "",
-    spot: "discovery",
-    daily_budget_cents: 100,
-    days: 3
-  });
+const CAMPAIGN_TYPES_META = {
+  boost_lite:     { label: "Boost Léger",          desc: "Tester un son avec un petit budget.",                     icon: "🔆", prices: { 1: 299, 3: 599, 7: 899 } },
+  boost_standard: { label: "Boost Standard",        desc: "Visibilité réelle sur les sections clés.",               icon: "⚡", prices: { 3: 999, 7: 1499, 14: 2499 } },
+  boost_premium:  { label: "Boost Premium",         desc: "Placement fort sur toutes les sections.",                icon: "🔥", prices: { 7: 2499, 14: 3999 } },
+  launch:         { label: "Lancement",             desc: "Badge Nouveau pour une sortie fraîche.",                 icon: "🚀", prices: { 1: 499, 3: 999, 7: 1499 } },
+  profile_boost:  { label: "Profil Sponsorisé",     desc: "Gagner des followers ciblés.",                           icon: "👤", prices: { 7: 799, 14: 1299 } },
+  genre_targeted: { label: "Genre Ciblé",           desc: "Audience qualifiée par genre et comportement.",          icon: "🎯", prices: { 3: 1199, 7: 1999 } },
+  retargeting:    { label: "Retargeting Interne",   desc: "Remontrer ton son aux auditeurs d'artistes similaires.", icon: "🔁", prices: { 7: 999, 14: 1699 } },
+  new_talent:     { label: "Nouveau Talent",        desc: "Programme spécial pour artistes émergents (≤500 followers).", icon: "🌱", prices: { 7: 0, 14: 199 } },
+};
+
+const OBJECTIVES_META = {
+  plays:     "Écoutes",
+  followers: "Followers",
+  sales:     "Ventes",
+  downloads: "Téléchargements",
+  likes:     "Likes",
+  visibility:"Visibilité",
+  dubpack_visibility: "Visibilité Dubpack",
+};
+
+const STATUS_LABELS = {
+  draft: "Brouillon",
+  pending_payment: "Paiement requis",
+  paid: "Payé",
+  under_review: "En revue",
+  active: "Active",
+  paused: "En pause",
+  completed: "Terminée",
+  cancelled: "Annulée",
+  rejected: "Refusée",
+};
+
+function CampaignStatusBadge({ status }) {
+  const colors = { draft: "#555", pending_payment: "#f59e0b", paid: "#10b981", under_review: "#3b82f6", active: "#22c55e", paused: "#6366f1", completed: "#8b5cf6", cancelled: "#6b7280", rejected: "#ef4444" };
+  return <span className={`campaign-status-badge status-${status}`} style={{ background: colors[status] + "22", color: colors[status], border: `1px solid ${colors[status]}44` }}>{STATUS_LABELS[status] || status}</span>;
+}
+
+function CampaignCreateWizard({ releases, notify, onDone }) {
+  const eligibleReleases = releases.filter(r => r.moderation_status === "published" && r.visibility === "public");
+  const [step, setStep] = useState(1);
+  const [form, setForm] = useState({ campaign_type: "boost_standard", objective: "plays", release_id: eligibleReleases[0]?.id || "", days: 7, title: "" });
+  const [estimate, setEstimate] = useState(null);
+  const [issues, setIssues] = useState([]);
   const [busy, setBusy] = useState(false);
-  const [actionBusy, setActionBusy] = useState("");
   const [error, setError] = useState("");
-  const update = (key, value) => setForm((current) => ({ ...current, [key]: value }));
-  const totalBudget = Number(form.daily_budget_cents) * Number(form.days || 0);
-  const submit = async (event) => {
-    event.preventDefault();
-    setError("");
-    setBusy(true);
+  const update = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  const meta = CAMPAIGN_TYPES_META[form.campaign_type] || {};
+  const availDays = meta.prices ? Object.keys(meta.prices).map(Number).sort((a, b) => a - b) : [7];
+  const priceCents = meta.prices?.[form.days] ?? null;
+  const selectedRelease = eligibleReleases.find(r => r.id === form.release_id);
+
+  useEffect(() => {
+    if (!form.campaign_type || !form.days) return;
+    const releaseId = form.release_id;
+    request(`/campaigns/estimate`, { method: "POST", body: JSON.stringify({ campaign_type: form.campaign_type, days: form.days, release_id: releaseId }) })
+      .then(d => setEstimate(d)).catch(() => {});
+  }, [form.campaign_type, form.days, form.release_id]);
+
+  const submit = async () => {
+    setBusy(true); setError("");
     try {
-      const result = await request("/me/campaigns", { method: "POST", body: JSON.stringify(form) });
-      notify("Campagne créée. Finalise le paiement pour l'activer.");
-      if (result.url) window.location.href = result.url;
-      else setRefreshKey((value) => value + 1);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setBusy(false);
-    }
+      const res = await request("/campaigns", { method: "POST", body: JSON.stringify({ ...form, title: form.title || selectedRelease?.title || meta.label, target_type: "release" }) });
+      setIssues(res.content_issues || []);
+      const campaign = res.campaign;
+      if (priceCents === 0) { notify("Campagne activée !"); onDone?.(); return; }
+      const checkout = await request(`/campaigns/${campaign.id}/checkout`, { method: "POST" });
+      if (checkout.url) { window.location.href = checkout.url; return; }
+      notify("Campagne créée."); onDone?.();
+    } catch (e) { setError(e.message); } finally { setBusy(false); }
   };
+
+  if (!eligibleReleases.length) return (
+    <div className="campaign-empty"><Sparkles size={24} /><strong>Aucune release éligible</strong><p>Publie une release publique avant de lancer une campagne.</p></div>
+  );
+
+  return (
+    <div className="campaign-wizard">
+      <div className="campaign-wizard-steps">
+        {["Type", "Release", "Durée", "Objectif", "Résumé"].map((s, i) => (
+          <button key={s} className={`cw-step ${step === i + 1 ? "active" : step > i + 1 ? "done" : ""}`} onClick={() => step > i + 1 && setStep(i + 1)} type="button">
+            <span>{step > i + 1 ? "✓" : i + 1}</span>{s}
+          </button>
+        ))}
+      </div>
+
+      {step === 1 && (
+        <div className="cw-panel">
+          <h3>Choisis ton type de campagne</h3>
+          <div className="campaign-type-grid">
+            {Object.entries(CAMPAIGN_TYPES_META).map(([key, m]) => (
+              <button key={key} type="button" className={`campaign-type-card ${form.campaign_type === key ? "selected" : ""}`} onClick={() => { update("campaign_type", key); const firstDay = Object.keys(m.prices || { 7: 0 }).map(Number).sort((a, b) => a - b)[0]; update("days", firstDay); }}>
+                <span className="ct-icon">{m.icon}</span>
+                <strong>{m.label}</strong>
+                <small>{m.desc}</small>
+                <em>{m.prices ? `à partir de ${money(Math.min(...Object.values(m.prices)))}` : ""}</em>
+              </button>
+            ))}
+          </div>
+          <button className="button accent cw-next" onClick={() => setStep(2)}>Continuer <ChevronRight size={15} /></button>
+        </div>
+      )}
+
+      {step === 2 && (
+        <div className="cw-panel">
+          <h3>Quelle release veux-tu promouvoir ?</h3>
+          <div className="campaign-release-grid">
+            {eligibleReleases.slice(0, 12).map(r => (
+              <button key={r.id} type="button" className={`campaign-release-card ${form.release_id === r.id ? "selected" : ""}`} onClick={() => update("release_id", r.id)}>
+                <ReleaseThumbnail release={r} size={48} />
+                <div><strong>{r.title}</strong><small>{r.genre} · {r.kind}</small><em>{shortNumber(r.plays || 0)} écoutes</em></div>
+                {r.cover_url ? null : <span className="warning-dot" title="Pas de cover">⚠</span>}
+              </button>
+            ))}
+          </div>
+          <div className="cw-nav"><button className="button ghost" onClick={() => setStep(1)} type="button"><ChevronLeft size={15} /> Retour</button><button className="button accent" onClick={() => setStep(3)} disabled={!form.release_id} type="button">Continuer <ChevronRight size={15} /></button></div>
+        </div>
+      )}
+
+      {step === 3 && (
+        <div className="cw-panel">
+          <h3>Durée de la campagne</h3>
+          <div className="campaign-days-grid">
+            {availDays.map(d => (
+              <button key={d} type="button" className={`campaign-day-card ${form.days === d ? "selected" : ""}`} onClick={() => update("days", d)}>
+                <strong>{d} jour{d > 1 ? "s" : ""}</strong>
+                <em>{money(meta.prices?.[d] ?? 0)}</em>
+              </button>
+            ))}
+          </div>
+          {estimate && (
+            <div className="campaign-estimate">
+              <span className="eyebrow">Estimations indicatives</span>
+              <div className="estimate-grid">
+                <div><strong>{estimate.estimates?.impressions?.min?.toLocaleString() ?? "—"}–{estimate.estimates?.impressions?.max?.toLocaleString() ?? "—"}</strong><small>Impressions</small></div>
+                <div><strong>{estimate.estimates?.clicks?.min ?? "—"}–{estimate.estimates?.clicks?.max ?? "—"}</strong><small>Clics</small></div>
+                <div><strong>{estimate.estimates?.listens?.min ?? "—"}–{estimate.estimates?.listens?.max ?? "—"}</strong><small>Écoutes</small></div>
+              </div>
+              {estimate.recommendation?.issues?.length > 0 && (
+                <div className="campaign-issues">{estimate.recommendation.issues.map((issue, i) => <p key={i} className="issue-row"><span>⚠</span>{issue.msg}</p>)}</div>
+              )}
+            </div>
+          )}
+          <div className="cw-nav"><button className="button ghost" onClick={() => setStep(2)} type="button"><ChevronLeft size={15} /> Retour</button><button className="button accent" onClick={() => setStep(4)} type="button">Continuer <ChevronRight size={15} /></button></div>
+        </div>
+      )}
+
+      {step === 4 && (
+        <div className="cw-panel">
+          <h3>Objectif principal</h3>
+          <div className="campaign-objective-grid">
+            {Object.entries(OBJECTIVES_META).map(([key, label]) => (
+              <button key={key} type="button" className={`campaign-objective-card ${form.objective === key ? "selected" : ""}`} onClick={() => update("objective", key)}>
+                <strong>{label}</strong>
+              </button>
+            ))}
+          </div>
+          <div className="cw-nav"><button className="button ghost" onClick={() => setStep(3)} type="button"><ChevronLeft size={15} /> Retour</button><button className="button accent" onClick={() => setStep(5)} type="button">Continuer <ChevronRight size={15} /></button></div>
+        </div>
+      )}
+
+      {step === 5 && (
+        <div className="cw-panel">
+          <h3>Résumé de ta campagne</h3>
+          <div className="campaign-summary-card">
+            {selectedRelease && <ReleaseThumbnail release={selectedRelease} size={64} />}
+            <div className="cs-details">
+              <div className="cs-row"><span>Type</span><strong>{meta.icon} {meta.label}</strong></div>
+              <div className="cs-row"><span>Release</span><strong>{selectedRelease?.title || "—"}</strong></div>
+              <div className="cs-row"><span>Durée</span><strong>{form.days} jour{form.days > 1 ? "s" : ""}</strong></div>
+              <div className="cs-row"><span>Objectif</span><strong>{OBJECTIVES_META[form.objective] || form.objective}</strong></div>
+              <div className="cs-row total"><span>Total</span><strong>{priceCents !== null ? (priceCents === 0 ? "Gratuit" : money(priceCents)) : "—"}</strong></div>
+            </div>
+          </div>
+          {issues.length > 0 && <div className="campaign-issues">{issues.map((issue, i) => <p key={i} className="issue-row"><span>⚠</span>{issue.msg}</p>)}</div>}
+          {error && <p className="error">{error}</p>}
+          <div className="cw-nav"><button className="button ghost" onClick={() => setStep(4)} type="button"><ChevronLeft size={15} /> Retour</button><button className="button accent" onClick={submit} disabled={busy} type="button">{busy ? <Loader2 className="spin" size={16} /> : <CreditCard size={16} />} {priceCents === 0 ? "Activer" : "Payer & Lancer"}</button></div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CampaignRow({ campaign, onAction, actionBusy }) {
+  const impressions = Number(campaign.impressions || 0);
+  const clicks = Number(campaign.clicks || 0);
+  const ctr = impressions > 0 ? ((clicks / impressions) * 100).toFixed(1) : "0.0";
+  const meta = CAMPAIGN_TYPES_META[campaign.campaign_type] || {};
+  return (
+    <article className={`campaign-row status-${campaign.status}`}>
+      <ReleaseThumbnail release={{ cover_url: campaign.image_url || campaign.release_cover_url, title: campaign.release_title }} size={54} />
+      <div className="campaign-row-main">
+        <div><strong>{campaign.title}</strong><CampaignStatusBadge status={campaign.status} /></div>
+        <small>{meta.icon} {meta.label || campaign.campaign_type} · {campaign.days}j · {campaign.release_title || "Profil"}</small>
+        {campaign.rejection_reason && <p className="campaign-rejection">Refusé : {campaign.rejection_reason}</p>}
+      </div>
+      <div className="campaign-row-metrics">
+        <span><b>{shortNumber(impressions)}</b><em>impressions</em></span>
+        <span><b>{shortNumber(clicks)}</b><em>clics</em></span>
+        <span><b>{ctr}%</b><em>CTR</em></span>
+        <span><b>{money(Number(campaign.budget_cents || 0))}</b><em>budget</em></span>
+      </div>
+      <div className="campaign-row-actions">
+        {["pending_payment", "draft"].includes(campaign.status) && <button className="button accent" type="button" disabled={actionBusy === `${campaign.id}:checkout`} onClick={() => onAction(campaign, "checkout")}>{actionBusy === `${campaign.id}:checkout` ? <Loader2 className="spin" size={14} /> : <CreditCard size={14} />} Payer</button>}
+        {campaign.status === "active" && <button className="button ghost" type="button" disabled={actionBusy === `${campaign.id}:pause`} onClick={() => onAction(campaign, "pause")}>{actionBusy === `${campaign.id}:pause` ? <Loader2 className="spin" size={14} /> : <Pause size={14} />} Pause</button>}
+        {campaign.status === "paused" && <button className="button ghost" type="button" disabled={actionBusy === `${campaign.id}:resume`} onClick={() => onAction(campaign, "resume")}>{actionBusy === `${campaign.id}:resume` ? <Loader2 className="spin" size={14} /> : <Play size={14} />} Reprendre</button>}
+        {["draft", "pending_payment", "paid", "under_review", "active", "paused"].includes(campaign.status) && <button className="button ghost campaign-stop" type="button" disabled={actionBusy === `${campaign.id}:cancel`} onClick={() => onAction(campaign, "cancel")}><X size={14} /></button>}
+      </div>
+    </article>
+  );
+}
+
+function ArtistInsightsPanel() {
+  const { data, loading } = useData("/campaigns/insights/me");
+  const [dismissed, setDismissed] = useState(new Set());
+  const insights = (data?.insights || []).filter(i => !dismissed.has(i.id));
+  if (loading || !insights.length) return null;
+  const dismiss = async (id) => {
+    setDismissed(d => new Set([...d, id]));
+    request(`/campaigns/insights/${id}/dismiss`, { method: "POST" }).catch(() => {});
+  };
+  return (
+    <div className="artist-insights-panel">
+      <div className="aip-head"><Sparkles size={16} /><span>Insights</span></div>
+      <div className="aip-list">
+        {insights.slice(0, 5).map(i => (
+          <div key={i.id} className="aip-item">
+            <div className="aip-body"><strong>{i.title}</strong><p>{i.body}</p>{i.action_url && <a href={i.action_url} className="aip-link">{i.action_label || "Voir"} →</a>}</div>
+            <button className="aip-dismiss" onClick={() => dismiss(i.id)} type="button"><X size={13} /></button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ArtistGoalsPanel() {
+  const { data, loading } = useData("/campaigns/goals/me");
+  const goals = (data?.goals || []).filter(g => g.status === "active");
+  if (loading || !goals.length) return null;
+  return (
+    <div className="artist-goals-panel">
+      <div className="agp-head"><Target size={16} /><span>Objectifs</span></div>
+      <div className="agp-list">
+        {goals.slice(0, 4).map(g => (
+          <div key={g.id} className="agp-goal">
+            <div className="agp-top"><span>{g.label}</span><em>{g.current_value}/{g.target_value}</em></div>
+            <div className="agp-bar"><div className="agp-fill" style={{ width: `${g.progress}%` }} /></div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ProfileScorePanel() {
+  const { data, loading } = useData("/campaigns/profile-score/me");
+  if (loading || !data) return null;
+  const { score, improvement_actions } = data;
+  const labelColors = { weak: "#ef4444", correct: "#f59e0b", solid: "#10b981", premium: "#22c55e" };
+  return (
+    <div className="profile-score-panel">
+      <div className="psp-head">
+        <div><span className="eyebrow">Score profil</span><strong className="psp-score" style={{ color: labelColors[score.label] }}>{score.total_score}<em>/100</em></strong></div>
+        <span className="psp-label" style={{ color: labelColors[score.label] }}>{score.label}</span>
+      </div>
+      <div className="psp-bars">
+        {[["Profil", score.profile_score, 40], ["Engagement", score.engagement_score, 20], ["Croissance", score.growth_score, 10], ["Qualité", score.quality_score, 30]].map(([k, v, max]) => (
+          <div key={k} className="psp-bar-row"><span>{k}</span><div className="psp-bar"><div className="psp-fill" style={{ width: `${Math.round(v / max * 100)}%` }} /></div><em>{v}/{max}</em></div>
+        ))}
+      </div>
+      {improvement_actions.length > 0 && (
+        <div className="psp-actions"><span className="eyebrow">À améliorer</span>{improvement_actions.slice(0, 3).map(a => <a key={a.field} href={a.url} className="psp-action">{a.label} →</a>)}</div>
+      )}
+    </div>
+  );
+}
+
+function CampaignManager({ releases, notify }) {
+  const [refreshKey, setRefreshKey] = useState(0);
+  const { data, loading } = useData("/campaigns", [refreshKey]);
+  const [showWizard, setShowWizard] = useState(false);
+  const [actionBusy, setActionBusy] = useState("");
   const campaigns = data?.campaigns || [];
-  const activeCampaigns = campaigns.filter((campaign) => campaign.status === "active");
-  const totalImpressions = campaigns.reduce((sum, campaign) => sum + Number(campaign.impressions || 0), 0);
-  const totalClicks = campaigns.reduce((sum, campaign) => sum + Number(campaign.clicks || 0), 0);
-  const ctr = totalImpressions ? (totalClicks / totalImpressions) * 100 : 0;
+  const activeCampaigns = campaigns.filter(c => c.status === "active");
+  const totalImpressions = campaigns.reduce((s, c) => s + Number(c.impressions || 0), 0);
+  const totalClicks = campaigns.reduce((s, c) => s + Number(c.clicks || 0), 0);
+  const ctr = totalImpressions > 0 ? ((totalClicks / totalImpressions) * 100).toFixed(1) : "0.0";
+
   const runAction = async (campaign, action) => {
     if (action === "cancel" && !window.confirm("Arrêter définitivement cette campagne ?")) return;
     setActionBusy(`${campaign.id}:${action}`);
     try {
-      await request(`/me/campaigns/${campaign.id}`, { method: "PATCH", body: JSON.stringify({ action }) });
-      notify(action === "pause" ? "Campagne mise en pause." : action === "resume" ? "Campagne relancée." : "Campagne arrêtée.");
-      setRefreshKey((value) => value + 1);
-    } catch (err) {
-      notify(err.message);
-    } finally {
-      setActionBusy("");
-    }
-  };
-  const resumeCheckout = async (campaign) => {
-    setActionBusy(`${campaign.id}:checkout`);
-    try {
-      const result = await request(`/me/campaigns/${campaign.id}/checkout`, { method: "POST" });
-      if (result.url) window.location.href = result.url;
-      else {
-        notify("Paiement confirmé, campagne activée.");
-        setRefreshKey((value) => value + 1);
-        setActionBusy("");
+      if (action === "checkout") {
+        const result = await request(`/campaigns/${campaign.id}/checkout`, { method: "POST" });
+        if (result.url) { window.location.href = result.url; return; }
+        notify("Campagne activée."); setRefreshKey(k => k + 1);
+      } else if (action === "pause") {
+        await request(`/campaigns/${campaign.id}/pause`, { method: "POST" });
+        notify("Campagne mise en pause."); setRefreshKey(k => k + 1);
+      } else if (action === "resume") {
+        await request(`/campaigns/${campaign.id}/resume`, { method: "POST" });
+        notify("Campagne relancée."); setRefreshKey(k => k + 1);
+      } else if (action === "cancel") {
+        await request(`/campaigns/${campaign.id}/cancel`, { method: "POST" });
+        notify("Campagne annulée."); setRefreshKey(k => k + 1);
       }
-    } catch (err) {
-      notify(err.message);
-      setActionBusy("");
-    }
+    } catch (err) { notify(err.message); } finally { setActionBusy(""); }
   };
+
   return (
     <section className="campaign-manager-card">
       <div className="campaign-manager-head">
-        <div className="link-shortener-head">
-          <Sparkles size={22} />
-          <div>
-            <h2>Campagnes de promotion</h2>
-            <p>Propulse une release, suis ses performances et garde le contrôle sur sa diffusion.</p>
-          </div>
+        <div className="link-shortener-head"><Sparkles size={22} /><div><h2>Campagnes de promotion</h2><p>Propulse tes releases, suis leurs performances et garde le contrôle.</p></div></div>
+        <div className="campaign-head-actions">
+          <button className="button ghost" type="button" onClick={() => setRefreshKey(k => k + 1)}><RefreshCw size={15} /></button>
+          <button className="button accent" type="button" onClick={() => setShowWizard(v => !v)}>{showWizard ? <X size={15} /> : <><Sparkles size={15} /> Nouvelle campagne</>}</button>
         </div>
-        <button className="button ghost" type="button" onClick={() => setRefreshKey((value) => value + 1)}><RefreshCw size={15} /> Actualiser</button>
       </div>
 
       <div className="campaign-kpis">
         <div><span>Actives</span><strong>{activeCampaigns.length}</strong></div>
         <div><span>Impressions</span><strong>{shortNumber(totalImpressions)}</strong></div>
         <div><span>Clics</span><strong>{shortNumber(totalClicks)}</strong></div>
-        <div><span>CTR global</span><strong>{ctr.toFixed(1)}%</strong></div>
+        <div><span>CTR global</span><strong>{ctr}%</strong></div>
       </div>
 
-      <div className="campaign-create-panel">
-        <div>
-          <span className="eyebrow">Nouvelle campagne</span>
-          <h3>Choisis la release à mettre en avant</h3>
-          <p>Le budget total est payé une fois. La campagne démarre uniquement après confirmation Stripe.</p>
+      {showWizard && (
+        <div className="campaign-wizard-shell">
+          <CampaignCreateWizard releases={releases} notify={notify} onDone={() => { setShowWizard(false); setRefreshKey(k => k + 1); }} />
         </div>
-      <form className="campaign-form" onSubmit={submit}>
-        <label>Release<select value={form.release_id} onChange={(event) => {
-            const next = eligibleReleases.find((release) => release.id === event.target.value);
-            setForm((current) => ({ ...current, release_id: event.target.value, title: next?.title || current.title, image_url: next?.cover_url || "" }));
-          }}><option value="">Sélectionner une release</option>{eligibleReleases.map((release) => <option key={release.id} value={release.id}>{release.title}</option>)}</select>{!eligibleReleases.length && <small>Publie une release publique avant de créer une campagne.</small>}</label>
-        <label>Titre<input value={form.title} maxLength={90} onChange={(event) => update("title", event.target.value)} placeholder="Nom de la campagne" /></label>
-        <label>Placement<select value={form.spot} onChange={(event) => update("spot", event.target.value)}><option value="discovery">Discovery feed</option><option value="homepage">Accueil</option><option value="charts">Classements</option><option value="sidebar">Encart catalogue</option></select></label>
-        <label>Budget quotidien<select value={form.daily_budget_cents} onChange={(event) => update("daily_budget_cents", Number(event.target.value))}><option value={100}>1 EUR / jour</option><option value={300}>3 EUR / jour</option><option value={500}>5 EUR / jour</option></select></label>
-        <label>Durée<input type="number" min="1" max="30" value={form.days} onChange={(event) => update("days", Number(event.target.value))} /><small>De 1 à 30 jours</small></label>
-        <label>Visuel personnalisé <small>(optionnel)</small><input value={form.image_url} onChange={(event) => update("image_url", event.target.value)} placeholder="La cover de la release sera utilisée" /></label>
-        {error && <p className="error">{error}</p>}
-        <div className="campaign-checkout-summary"><span>Budget total</span><strong>{money(totalBudget)}</strong><small>{form.days || 0} jour{Number(form.days) > 1 ? "s" : ""} à {money(form.daily_budget_cents)}/jour</small></div>
-        <button className="button accent" type="submit" disabled={busy || !form.release_id || !form.title.trim()}>{busy ? <Loader2 className="spin" size={16} /> : <CreditCard size={16} />} Payer et lancer la campagne</button>
-      </form>
+      )}
+
+      <div className="campaign-insights-row">
+        <ArtistInsightsPanel />
+        <ArtistGoalsPanel />
+        <ProfileScorePanel />
       </div>
 
       <div className="campaign-list">
         <div className="campaign-list-head"><div><span className="eyebrow">Historique</span><h3>Tes campagnes</h3></div><span>{campaigns.length} au total</span></div>
-        {loading ? <p className="muted">Chargement des campagnes...</p> : !campaigns.length ? <div className="campaign-empty"><BarChart3 size={22} /><strong>Aucune campagne</strong><p>Ta première campagne apparaîtra ici avec ses statistiques.</p></div> : campaigns.map((campaign) => {
-          const impressions = Number(campaign.impressions || 0);
-          const clicks = Number(campaign.clicks || 0);
-          const campaignCtr = impressions ? (clicks / impressions) * 100 : 0;
-          const statusLabel = { active: "Active", paused: "En pause", pending: "Paiement requis", completed: "Terminée", cancelled: "Arrêtée" }[campaign.status] || campaign.status;
-          return (
-            <article key={campaign.id} className={`campaign-row status-${campaign.status}`}>
-              <ReleaseThumbnail release={{ cover_url: campaign.image_url || campaign.release_cover_url, title: campaign.release_title, artist: campaign.owner_name }} size={58} />
-              <div className="campaign-row-main"><div><strong>{campaign.title}</strong><span className={`campaign-status status-${campaign.status}`}>{statusLabel}</span></div><small>{campaign.release_title} · {campaign.spot} · {campaign.days} jour{campaign.days > 1 ? "s" : ""}</small></div>
-              <div className="campaign-row-metrics"><span><b>{shortNumber(impressions)}</b> impressions</span><span><b>{shortNumber(clicks)}</b> clics</span><span><b>{campaignCtr.toFixed(1)}%</b> CTR</span><span><b>{money(campaign.daily_budget_cents * campaign.days)}</b> budget</span></div>
-              <div className="campaign-row-actions">
-                {campaign.status === "pending" && <button className="button accent" type="button" disabled={actionBusy === `${campaign.id}:checkout`} onClick={() => resumeCheckout(campaign)}>{actionBusy === `${campaign.id}:checkout` ? <Loader2 className="spin" size={14} /> : <CreditCard size={14} />} Payer</button>}
-                {campaign.status === "active" && <button className="button ghost" type="button" disabled={actionBusy === `${campaign.id}:pause`} onClick={() => runAction(campaign, "pause")}><Pause size={14} /> Pause</button>}
-                {campaign.status === "paused" && <button className="button ghost" type="button" disabled={actionBusy === `${campaign.id}:resume`} onClick={() => runAction(campaign, "resume")}><Play size={14} /> Reprendre</button>}
-                {["pending", "active", "paused"].includes(campaign.status) && <button className="button ghost campaign-stop" type="button" disabled={actionBusy === `${campaign.id}:cancel`} onClick={() => runAction(campaign, "cancel")}><X size={14} /> Arrêter</button>}
-              </div>
-            </article>
-          );
-        })}
+        {loading ? <p className="muted">Chargement...</p> : !campaigns.length ? (
+          <div className="campaign-empty"><BarChart3 size={22} /><strong>Aucune campagne</strong><p>Lance ta première campagne pour propulser tes sons.</p></div>
+        ) : campaigns.map(c => <CampaignRow key={c.id} campaign={c} onAction={runAction} actionBusy={actionBusy} />)}
       </div>
     </section>
   );

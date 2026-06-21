@@ -289,6 +289,120 @@ export function initDb() {
       status TEXT NOT NULL DEFAULT 'pending',
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
+    CREATE TABLE IF NOT EXISTS download_tokens (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      release_id TEXT NOT NULL REFERENCES releases(id) ON DELETE CASCADE,
+      purchase_id TEXT REFERENCES purchases(id) ON DELETE SET NULL,
+      token_hash TEXT NOT NULL UNIQUE,
+      watermark_id TEXT NOT NULL DEFAULT '',
+      expires_at TEXT NOT NULL,
+      used_count INTEGER NOT NULL DEFAULT 0,
+      max_uses INTEGER NOT NULL DEFAULT 3,
+      is_revoked INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS download_logs (
+      id TEXT PRIMARY KEY,
+      user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      release_id TEXT NOT NULL REFERENCES releases(id) ON DELETE CASCADE,
+      token_id TEXT REFERENCES download_tokens(id) ON DELETE SET NULL,
+      ip_hash TEXT NOT NULL DEFAULT '',
+      user_agent TEXT NOT NULL DEFAULT '',
+      watermark_id TEXT NOT NULL DEFAULT '',
+      file_hash TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS security_logs (
+      id TEXT PRIMARY KEY,
+      user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      action TEXT NOT NULL,
+      entity_type TEXT NOT NULL DEFAULT '',
+      entity_id TEXT NOT NULL DEFAULT '',
+      ip_hash TEXT NOT NULL DEFAULT '',
+      user_agent TEXT NOT NULL DEFAULT '',
+      details TEXT NOT NULL DEFAULT '{}',
+      severity TEXT NOT NULL DEFAULT 'info',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS artist_licenses (
+      id TEXT PRIMARY KEY,
+      release_id TEXT NOT NULL REFERENCES releases(id) ON DELETE CASCADE UNIQUE,
+      license_type TEXT NOT NULL DEFAULT 'personal',
+      personal_use INTEGER NOT NULL DEFAULT 1,
+      commercial_use INTEGER NOT NULL DEFAULT 0,
+      remix_allowed INTEGER NOT NULL DEFAULT 0,
+      attribution_required INTEGER NOT NULL DEFAULT 1,
+      resale_allowed INTEGER NOT NULL DEFAULT 0,
+      notes TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS campaign_events (
+      id TEXT PRIMARY KEY,
+      campaign_id TEXT NOT NULL REFERENCES promotion_campaigns(id) ON DELETE CASCADE,
+      user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      session_hash TEXT NOT NULL DEFAULT '',
+      event_type TEXT NOT NULL,
+      placement TEXT NOT NULL DEFAULT '',
+      ip_hash TEXT NOT NULL DEFAULT '',
+      ua_hash TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS campaign_daily_stats (
+      campaign_id TEXT NOT NULL REFERENCES promotion_campaigns(id) ON DELETE CASCADE,
+      stat_date TEXT NOT NULL,
+      impressions INTEGER NOT NULL DEFAULT 0,
+      clicks INTEGER NOT NULL DEFAULT 0,
+      listens INTEGER NOT NULL DEFAULT 0,
+      likes INTEGER NOT NULL DEFAULT 0,
+      follows INTEGER NOT NULL DEFAULT 0,
+      sales INTEGER NOT NULL DEFAULT 0,
+      spend_cents INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (campaign_id, stat_date)
+    );
+    CREATE TABLE IF NOT EXISTS artist_goals (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      goal_type TEXT NOT NULL,
+      target_value INTEGER NOT NULL DEFAULT 0,
+      current_value INTEGER NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'active',
+      reward_type TEXT NOT NULL DEFAULT 'none',
+      reward_value INTEGER NOT NULL DEFAULT 0,
+      started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      completed_at TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS artist_profile_scores (
+      user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      total_score INTEGER NOT NULL DEFAULT 0,
+      profile_score INTEGER NOT NULL DEFAULT 0,
+      engagement_score INTEGER NOT NULL DEFAULT 0,
+      growth_score INTEGER NOT NULL DEFAULT 0,
+      quality_score INTEGER NOT NULL DEFAULT 0,
+      label TEXT NOT NULL DEFAULT 'weak',
+      computed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS artist_insights (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      release_id TEXT REFERENCES releases(id) ON DELETE CASCADE,
+      insight_type TEXT NOT NULL,
+      priority INTEGER NOT NULL DEFAULT 5,
+      title TEXT NOT NULL,
+      body TEXT NOT NULL,
+      action_url TEXT NOT NULL DEFAULT '',
+      action_label TEXT NOT NULL DEFAULT '',
+      dismissed INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS ad_impression_dedup (
+      session_hash TEXT NOT NULL,
+      campaign_id TEXT NOT NULL REFERENCES promotion_campaigns(id) ON DELETE CASCADE,
+      count INTEGER NOT NULL DEFAULT 1,
+      last_seen TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (session_hash, campaign_id)
+    );
   `);
 
   const userColumns = db.prepare("PRAGMA table_info(users)").all().map((column) => column.name);
@@ -331,12 +445,32 @@ export function initDb() {
   addReleaseColumn("cover_url", "TEXT NOT NULL DEFAULT ''");
   addReleaseColumn("featured_artist", "TEXT NOT NULL DEFAULT ''");
   addReleaseColumn("visibility", "TEXT NOT NULL DEFAULT 'public'");
+  addReleaseColumn("license_type", "TEXT NOT NULL DEFAULT 'personal'");
+  addReleaseColumn("download_limit", "INTEGER NOT NULL DEFAULT 3");
 
   const checkoutColumns = db.prepare("PRAGMA table_info(stripe_checkouts)").all().map((column) => column.name);
   if (!checkoutColumns.includes("campaign_id")) db.exec("ALTER TABLE stripe_checkouts ADD COLUMN campaign_id TEXT REFERENCES promotion_campaigns(id) ON DELETE SET NULL");
 
   const campaignColumns = db.prepare("PRAGMA table_info(promotion_campaigns)").all().map((column) => column.name);
-  if (!campaignColumns.includes("paused_at")) db.exec("ALTER TABLE promotion_campaigns ADD COLUMN paused_at TEXT");
+  const addCampaignColumn = (name, definition) => {
+    if (!campaignColumns.includes(name)) db.exec(`ALTER TABLE promotion_campaigns ADD COLUMN ${name} ${definition}`);
+  };
+  addCampaignColumn("paused_at", "TEXT");
+  addCampaignColumn("campaign_type", "TEXT NOT NULL DEFAULT 'boost_standard'");
+  addCampaignColumn("objective", "TEXT NOT NULL DEFAULT 'plays'");
+  addCampaignColumn("budget_cents", "INTEGER NOT NULL DEFAULT 0");
+  addCampaignColumn("budget_spent_cents", "INTEGER NOT NULL DEFAULT 0");
+  addCampaignColumn("rejection_reason", "TEXT NOT NULL DEFAULT ''");
+  addCampaignColumn("moderation_notes", "TEXT NOT NULL DEFAULT ''");
+  addCampaignColumn("quality_score", "REAL NOT NULL DEFAULT 1.0");
+  addCampaignColumn("audience_targeting", "TEXT NOT NULL DEFAULT '{}'");
+  addCampaignColumn("listens_generated", "INTEGER NOT NULL DEFAULT 0");
+  addCampaignColumn("likes_generated", "INTEGER NOT NULL DEFAULT 0");
+  addCampaignColumn("follows_generated", "INTEGER NOT NULL DEFAULT 0");
+  addCampaignColumn("sales_generated", "INTEGER NOT NULL DEFAULT 0");
+  addCampaignColumn("placements", "TEXT NOT NULL DEFAULT '[]'");
+  addCampaignColumn("stripe_payment_intent_id", "TEXT NOT NULL DEFAULT ''");
+  addCampaignColumn("reviewed_by", "TEXT REFERENCES users(id)");
 
   // Organizer placements are no longer offered; keep their history without serving them.
   db.prepare("UPDATE promotion_campaigns SET status = 'cancelled' WHERE target_type = 'organizer' AND status IN ('active', 'pending', 'paused')").run();
@@ -367,6 +501,20 @@ export function initDb() {
     CREATE INDEX IF NOT EXISTS idx_payout_requests_user_status ON payout_requests (user_id, status, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_ticket_messages_ticket ON ticket_messages (ticket_id, created_at);
     CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON audit_logs (created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_download_tokens_user_release ON download_tokens (user_id, release_id);
+    CREATE INDEX IF NOT EXISTS idx_download_tokens_hash ON download_tokens (token_hash);
+    CREATE INDEX IF NOT EXISTS idx_download_logs_user_id ON download_logs (user_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_download_logs_release_id ON download_logs (release_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_security_logs_user_id ON security_logs (user_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_security_logs_action ON security_logs (action, severity, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_campaign_events_campaign ON campaign_events (campaign_id, event_type, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_campaign_events_user ON campaign_events (user_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_campaign_events_session ON campaign_events (session_hash, campaign_id);
+    CREATE INDEX IF NOT EXISTS idx_artist_goals_user ON artist_goals (user_id, status);
+    CREATE INDEX IF NOT EXISTS idx_artist_insights_user ON artist_insights (user_id, dismissed, priority DESC);
+    CREATE INDEX IF NOT EXISTS idx_ad_dedup_campaign ON ad_impression_dedup (campaign_id);
+    CREATE INDEX IF NOT EXISTS idx_promotion_campaigns_type ON promotion_campaigns (campaign_type, status, ends_at);
+    CREATE INDEX IF NOT EXISTS idx_promotion_campaigns_user ON promotion_campaigns (user_id, status, created_at DESC);
   `);
 
   const isProduction = process.env.NODE_ENV === "production";
