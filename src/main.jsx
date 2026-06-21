@@ -2770,7 +2770,7 @@ function CrateDropSection({ notify, playRelease }) {
         {data.releases.slice(0, 6).map((release) => (
           <article key={release.id} className="card release-card crate-drop-card">
             <div className="card-cover">
-              {release.cover_url ? <img src={release.cover_url} alt="" /> : <span className={`avatar ${release.color}`}>{release.avatar}</span>}
+              <PackArtwork release={release} large />
               <button className="card-play" onClick={() => playRelease(release)} aria-label={`Play ${release.title}`}><Play size={16} fill="currentColor" /></button>
             </div>
             <div className="card-meta">
@@ -3413,7 +3413,7 @@ function StaffPanel({ notify }) {
             <SectionTitle title="Moderation" />
             {data.releases.map((release) => (
               <div className="staff-row moderation-row" key={release.id}>
-                <span className={`avatar ${release.color}`}>{release.avatar}</span>
+                <ReleaseThumbnail release={release} size={36} />
                 <strong>{release.title}<small>{release.artist} - {release.scan_status}</small><small>{release.visibility} - {release.genre}</small></strong>
                 <select value={release.moderation_status} disabled={!canModerate} onChange={(event) => moderate(release.id, event.target.value)}>
                   <option>published</option>
@@ -3670,7 +3670,7 @@ function ShuffleTrackGrid({ releases }) {
       <div className="hero-release-strip">
         {stripItems.map((release) => (
           <a href={`/release/${release.id}`} key={`strip-${release.id}`}>
-            <i className={`avatar ${release.color}`}>{release.avatar}</i>
+            <ReleaseThumbnail release={release} size={28} />
             <span>{release.title}</span>
           </a>
         ))}
@@ -3691,7 +3691,7 @@ function HeroLatestTracks({ releases, playRelease }) {
         {latest.length ? latest.map((release, index) => (
           <article key={release.id}>
             <button className="play" onClick={() => playRelease(release)} aria-label={`Play ${release.title}`}><Play size={13} fill="currentColor" /></button>
-            <span className={`avatar ${release.color}`}>{release.avatar}</span>
+            <ReleaseThumbnail release={release} size={40} />
             <a href={`/release/${release.id}`}>
               <strong>{release.title}</strong>
               <small>{release.artist} - {release.genre}</small>
@@ -3934,7 +3934,7 @@ function DiscoveryHub({ notify, playRelease }) {
             <span className="label">Artists to follow</span>
             {data.suggested_artists.slice(0, 5).map((artist) => (
               <a href={artistPath(artist)} key={artist.id}>
-                <span className="avatar">{artist.logo_url || artist.avatar_url ? <img src={artist.logo_url || artist.avatar_url} alt="" /> : artist.avatar}</span>
+                <AvatarImg src={artist.logo_url || artist.avatar_url} fallback={artist.avatar || artist.name?.[0]} size={36} />
                 <strong>{artist.name}<small>{shortNumber(artist.followers)} followers</small></strong>
                 <em>{subscriptionLabel(artist)}</em>
               </a>
@@ -4034,7 +4034,7 @@ function Testimonials() {
             <blockquote>
               <p>{item.quote}</p>
               <footer>
-                <span className="avatar">{item.logo_url || item.avatar_url ? <img src={item.logo_url || item.avatar_url} alt="" /> : item.avatar}</span>
+                <AvatarImg src={item.logo_url || item.avatar_url} fallback={item.avatar || item.name?.[0]} size={40} />
                 <span><cite>{item.name}</cite><small>{item.role || "Artist"}</small></span>
               </footer>
             </blockquote>
@@ -4400,7 +4400,7 @@ function ReleaseDetail({ id, notify, playRelease }) {
             </div>
             <h1 className="rd-title">{release.title}</h1>
             <a href={profileHref} className="rd-artist">
-              <span className="avatar sm">{release.avatar_url || release.logo_url ? <img src={release.avatar_url || release.logo_url} alt="" /> : (release.avatar || release.artist?.[0])}</span>
+              <AvatarImg src={release.avatar_url || release.logo_url} fallback={release.avatar || release.artist?.[0]} size={24} />
               {release.artist}
             </a>
           </div>
@@ -5028,7 +5028,7 @@ function PricingPage({ notify }) {
     if (!user) { navigate("/auth"); return; }
     setLoading(planName);
     try {
-      const data = await request("/checkout/create-session", { method: "POST", body: JSON.stringify({ planName }) });
+      const data = await request("/checkout/create-session", { method: "POST", body: JSON.stringify({ plan: planName }) });
       if (data.url) { window.location.href = data.url; }
       else { notify(data.error || "Erreur Stripe"); }
     } catch (err) {
@@ -6131,7 +6131,7 @@ function ReleaseRow({ release, index, notify, playRelease, ranked, showModeratio
     <article className="release-row">
       {ranked && <span className="rank">{index + 1}</span>}
       <button className="play" onClick={() => playRelease(release)} aria-label={`Play ${release.title}`}><Play size={14} fill="currentColor" /></button>
-      <span className={`avatar ${release.color}`}>{release.avatar}</span>
+      <ReleaseThumbnail release={release} size={36} />
       <a className="release-main" href={`/release/${release.id}`}><strong>{release.title}</strong><span>{release.artist} - {release.genre} - {release.duration}</span></a>
       {showModeration && <ModerationBadge release={release} />}
       <span className={release.free ? "price free" : "price"}>{releasePrice(release)}</span>
@@ -6200,6 +6200,34 @@ function PackArtwork({ release, large = false }) {
     <div className={`pack-art ${release.color || "green"} ${large ? "large" : ""}`}>
       {showImg ? <img src={release.cover_url} alt="" onError={() => setImgErr(true)} /> : <CrateMark />}
     </div>
+  );
+}
+
+/* Avatar artiste avec fallback initiales */
+function AvatarImg({ src, fallback = "?", size = 36, className = "" }) {
+  const [err, setErr] = useState(false);
+  return (
+    <span className={`avatar ${className}`} style={{ width: size, height: size, minWidth: size, fontSize: size < 30 ? "0.6rem" : "0.75rem" }}>
+      {src && !err
+        ? <img src={src} alt="" onError={() => setErr(true)} style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "inherit" }} />
+        : fallback}
+    </span>
+  );
+}
+
+/* Petit thumbnail carré pour les listes/rows — affiche cover_url ou initiales artiste */
+function ReleaseThumbnail({ release, size = 36, className = "" }) {
+  const [imgErr, setImgErr] = useState(false);
+  const hasCover = release.cover_url && !imgErr;
+  return (
+    <span
+      className={`release-thumb ${release.color || "green"} ${className}`}
+      style={{ width: size, height: size, minWidth: size }}
+    >
+      {hasCover
+        ? <img src={release.cover_url} alt="" onError={() => setImgErr(true)} />
+        : <span>{release.avatar || release.artist?.[0] || "?"}</span>}
+    </span>
   );
 }
 
@@ -6359,10 +6387,9 @@ function FollowButton({ artistId, notify }) {
 }
 
 function ArtistCard({ artist, notify }) {
-  const logo = [artist.logo_url, artist.avatar_url].find((src) => isImageAvatar(src));
   return (
     <article className="card artist-card">
-      <span className="avatar artist-card-avatar">{logo ? <img src={logo} alt="" /> : artist.avatar}</span>
+      <AvatarImg src={artist.logo_url || artist.avatar_url} fallback={artist.avatar || artist.name?.[0]} size={56} className="artist-card-avatar" />
       <div>
         <h2>
           <a href={artistPath(artist)}>{artist.name}</a>
