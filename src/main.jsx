@@ -62,6 +62,7 @@ import {
   Tag,
   Target,
   Trash,
+  TrendingUp,
   Twitter,
   Upload,
   UserPlus,
