@@ -1,6 +1,6 @@
 # Undisc0ver deployment
 
-Production target: Debian 12, Nginx on the host, Docker Compose for the app stack, MariaDB provisioned in the stack, and the app mounted in `/var/www/Undisc0ver`.
+Production target: Debian 12, Nginx on the host, Docker Compose for the app stack, SQLite persisted in a Docker volume, and the app mounted in `/var/www/Undisc0ver`.
 
 The app database is persisted in the `undiscover_data` Docker volume. Production starts without demo artists or fake releases. A first admin account is created from `ADMIN_EMAIL` and `ADMIN_PASSWORD` in `.env`.
 
@@ -9,7 +9,7 @@ The app database is persisted in the `undiscover_data` Docker volume. Production
 Run as `root` on Debian 12. Replace the GitHub URL if the final repository changes.
 
 ```bash
-export DEBIAN_FRONTEND=noninteractive && apt update && apt install -y ca-certificates curl gnupg git nginx ufw openssl && install -m 0755 -d /etc/apt/keyrings && rm -f /etc/apt/keyrings/docker.gpg && curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg && chmod a+r /etc/apt/keyrings/docker.gpg && . /etc/os-release && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian $VERSION_CODENAME stable" > /etc/apt/sources.list.d/docker.list && apt update && apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin mariadb-client && systemctl enable --now docker nginx && mkdir -p /var/www && if [ -d /var/www/Undisc0ver/.git ]; then cd /var/www/Undisc0ver && git pull; else git clone https://github.com/Sauroraa/Undisc0ver.git /var/www/Undisc0ver && cd /var/www/Undisc0ver; fi && cp -n .env.example .env && ROOT_PASS="$(openssl rand -hex 24)" && DB_PASS="$(openssl rand -hex 24)" && ADMIN_PASS="$(openssl rand -base64 24 | tr -d '/+=' | cut -c1-24)" && sed -i "s/change_root_me/${ROOT_PASS}/;s/change_me/${DB_PASS}/;s/change_admin_password/${ADMIN_PASS}/;s/admin@undisc0ver.com/admin@undisc0ver.com/" .env && printf "\\nADMIN_LOGIN=admin@undisc0ver.com\\nADMIN_PASSWORD=%s\\n" "$ADMIN_PASS" > /root/undiscover-admin.txt && docker compose up -d --build && cp deploy/nginx/undiscover.conf /etc/nginx/sites-available/undiscover.conf && ln -sf /etc/nginx/sites-available/undiscover.conf /etc/nginx/sites-enabled/undiscover.conf && rm -f /etc/nginx/sites-enabled/default && nginx -t && systemctl reload nginx && ufw allow OpenSSH && ufw allow 'Nginx Full' && ufw --force enable && docker compose ps && cat /root/undiscover-admin.txt
+export DEBIAN_FRONTEND=noninteractive && apt update && apt install -y ca-certificates curl gnupg git nginx ufw openssl && install -m 0755 -d /etc/apt/keyrings && rm -f /etc/apt/keyrings/docker.gpg && curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg && chmod a+r /etc/apt/keyrings/docker.gpg && . /etc/os-release && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian $VERSION_CODENAME stable" > /etc/apt/sources.list.d/docker.list && apt update && apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin && systemctl enable --now docker nginx && mkdir -p /var/www && if [ -d /var/www/Undisc0ver/.git ]; then cd /var/www/Undisc0ver && git pull --ff-only; else git clone https://github.com/Sauroraa/Undisc0ver.git /var/www/Undisc0ver && cd /var/www/Undisc0ver; fi && cp -n .env.example .env && ADMIN_PASS="$(openssl rand -base64 24 | tr -d '/+=' | cut -c1-24)" && sed -i "s/change_admin_password/${ADMIN_PASS}/" .env && printf "\\nADMIN_LOGIN=admin@undisc0ver.com\\nADMIN_PASSWORD=%s\\n" "$ADMIN_PASS" > /root/undiscover-admin.txt && docker compose up -d --build --wait --wait-timeout 60 && cp deploy/nginx/undiscover.conf /etc/nginx/sites-available/undiscover.conf && ln -sf /etc/nginx/sites-available/undiscover.conf /etc/nginx/sites-enabled/undiscover.conf && rm -f /etc/nginx/sites-enabled/default && nginx -t && systemctl reload nginx && ufw allow OpenSSH && ufw allow 'Nginx Full' && ufw --force enable && docker compose ps && cat /root/undiscover-admin.txt
 ```
 
 ## First push to GitHub
@@ -26,7 +26,7 @@ git push -u origin main
 ## Update after a new push
 
 ```bash
-cd /var/www/Undisc0ver && git pull && docker compose up -d --build && nginx -t && systemctl reload nginx
+cd /var/www/Undisc0ver && git pull --ff-only && docker compose up -d --build --wait --wait-timeout 60 && curl -f http://127.0.0.1:3001/api/health && nginx -t && systemctl reload nginx
 ```
 
 If the VPS already had demo data from an older build, this version removes the known seeded demo artists/releases automatically when `PURGE_DEMO_DATA=true`.
