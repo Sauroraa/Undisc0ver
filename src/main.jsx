@@ -74,7 +74,7 @@ import {
 } from "lucide-react";
 import { AnimatePresence, motion, useScroll, useTransform } from "framer-motion";
 import "./styles.css";
-import { UserDashboard, ProDashboard, StaffDashboard, ModeratorDashboard, AdminDashboard } from "./dashboards.jsx";
+import { UserDashboard, ProDashboard, LabelDashboard, StaffDashboard, ModeratorDashboard, AdminDashboard } from "./dashboards.jsx";
 
 const API = "/api";
 const AuthContext = createContext(null);
@@ -2969,10 +2969,11 @@ function SmartDashboard({ notify, playRelease }) {
   const { user, loading } = useAuth();
   if (loading) return <main className="page"><div className="db-loading"><Loader2 className="spin" size={28} /></div></main>;
   if (!user) return <AuthPage mode="login" notify={notify} />;
-  if (user.role === "admin") return <AdminDashboard notify={notify} />;
-  if (user.role === "moderator") return <ModeratorDashboard notify={notify} />;
-  if (user.role === "staff") return <StaffDashboard notify={notify} />;
-  if (user.pro || user.role === "label" || user.plan === "pro") return <ProDashboard notify={notify} playRelease={playRelease} />;
+  if (user.role === "admin")      return <AdminDashboard notify={notify} />;
+  if (user.role === "moderator")  return <ModeratorDashboard notify={notify} />;
+  if (user.role === "staff")      return <StaffDashboard notify={notify} />;
+  if (user.role === "label")      return <LabelDashboard notify={notify} />;
+  if (user.pro || user.plan === "pro") return <ProDashboard notify={notify} playRelease={playRelease} />;
   return <UserDashboard notify={notify} playRelease={playRelease} />;
 }
 
@@ -3003,7 +3004,7 @@ function renderRoute(route, notify, playRelease) {
   if (path === "/privacy") return <PrivacyPage />;
   if (path === "/acceptable-use") return <AcceptableUsePage />;
   if (path === "/careers") return <CareersPage />;
-  if (path === "/staff") return <StaffPanel notify={notify} query={query} />;
+  if (path === "/staff") return <SmartDashboard notify={notify} playRelease={playRelease} />;
   // Role-based dashboard routing (server enforces access, frontend dispatches by role)
   if (path === "/dashboard") return <SmartDashboard notify={notify} playRelease={playRelease} />;
   if (path === "/dashboard/pro") return <ProDashboard notify={notify} playRelease={playRelease} />;

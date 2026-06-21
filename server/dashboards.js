@@ -601,6 +601,131 @@ dashboardsRouter.patch("/staff/tickets/:id", authMiddleware, (req, res) => {
   res.json({ ok: true });
 });
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// LABEL DASHBOARD
+// ═══════════════════════════════════════════════════════════════════════════════
+
+dashboardsRouter.get("/label", authMiddleware, (req, res) => {
+  if (!requireRole(req, res, ["label", "admin"])) return;
+  const labelId = req.user.id;
+
+  // Label profile (from users table)
+  const profile = db.prepare("SELECT id, name, bio, avatar_url, banner_url, genre, location, social_links FROM users WHERE id = ?").get(labelId);
+
+  // Roster of artists
+  const roster = db.prepare(`
+    SELECT u.id, u.name, u.avatar_url, u.genre, u.location, lm.role, lm.added_at,
+           COUNT(DISTINCT r.id) releases_count,
+           COALESCE(SUM(r.plays), 0) total_plays,
+           COALESCE(SUM(r.revenue_cents), 0) total_revenue
+    FROM label_members lm
+    JOIN users u ON u.id = lm.artist_id
+    LEFT JOIN releases r ON r.user_id = u.id AND r.moderation_status != 'removed'
+    WHERE lm.label_id = ?
+    GROUP BY u.id
+    ORDER BY total_plays DESC
+  `).all(labelId);
+
+  const artistIds = roster.map(a => a.id);
+  const allArtistIds = [labelId, ...artistIds];
+  const placeholders = allArtistIds.map(() => "?").join(",");
+
+  // Catalog: all releases from label + roster
+  const catalog = db.prepare(`
+    SELECT r.id, r.title, r.kind, r.genre, r.cover_url, r.plays, r.downloads, r.sales,
+           r.revenue_cents, r.price_cents, r.free, r.moderation_status, r.visibility, r.created_at,
+           u.name artist_name, u.id artist_id,
+           (SELECT COUNT(*) FROM likes l WHERE l.release_id = r.id) likes
+    FROM releases r JOIN users u ON u.id = r.user_id
+    WHERE r.user_id IN (${placeholders}) AND r.moderation_status != 'removed'
+    ORDER BY r.created_at DESC LIMIT 100
+  `).all(...allArtistIds);
+
+  // Aggregated stats
+  const statsRow = catalog.reduce((acc, r) => ({
+    plays: acc.plays + (r.plays || 0),
+    downloads: acc.downloads + (r.downloads || 0),
+    sales: acc.sales + (r.sales || 0),
+    revenue_cents: acc.revenue_cents + (r.revenue_cents || 0),
+  }), { plays: 0, downloads: 0, sales: 0, revenue_cents: 0 });
+
+  let totalFollowers = 0;
+  for (const id of allArtistIds) {
+    totalFollowers += db.prepare("SELECT COUNT(*) total FROM follows WHERE artist_id = ?").get(id).total;
+  }
+
+  const stats = { ...statsRow, total_artists: roster.length, total_releases: catalog.length, total_followers: totalFollowers };
+
+  // Series: plays for all label artists combined (30d)
+  const playsSeries = (() => {
+    if (!allArtistIds.length) return [];
+    const rows = db.prepare(`SELECT date(rl.created_at) day, COUNT(*) value FROM release_listens rl JOIN releases r ON r.id = rl.release_id WHERE r.user_id IN (${placeholders}) AND rl.created_at >= date('now','-30 days') GROUP BY day`).all(...allArtistIds);
+    const map = Object.fromEntries(rows.map(r => [r.day, r.value]));
+    const result = [];
+    for (let i = 29; i >= 0; i--) {
+      const d = new Date(Date.now() - i * 86400000);
+      const day = d.toISOString().slice(0, 10);
+      result.push({ date: day, value: map[day] || 0 });
+    }
+    return result;
+  })();
+
+  // Campaigns for label releases
+  const campaigns = db.prepare(`
+    SELECT pc.id, pc.title, pc.campaign_type, pc.status, pc.impressions, pc.clicks,
+           pc.budget_cents, pc.budget_spent_cents, pc.starts_at, pc.ends_at,
+           u.name artist_name, r.title release_title
+    FROM promotion_campaigns pc
+    JOIN users u ON u.id = pc.user_id
+    LEFT JOIN releases r ON r.id = pc.release_id
+    WHERE pc.user_id IN (${placeholders})
+    ORDER BY pc.created_at DESC LIMIT 30
+  `).all(...allArtistIds);
+
+  res.json({ profile, roster, catalog, stats, series: { plays: playsSeries }, campaigns });
+});
+
+// Update label branding
+dashboardsRouter.patch("/label/branding", authMiddleware, (req, res) => {
+  if (!requireRole(req, res, ["label", "admin"])) return;
+  const { name, bio, avatar_url, banner_url, genre, location, social_links } = req.body;
+  const updates = [];
+  const params = [];
+  if (name) { updates.push("name = ?"); params.push(String(name).slice(0, 80)); }
+  if (bio !== undefined) { updates.push("bio = ?"); params.push(String(bio).slice(0, 500)); }
+  if (avatar_url !== undefined) { updates.push("avatar_url = ?"); params.push(String(avatar_url)); }
+  if (banner_url !== undefined) { updates.push("banner_url = ?"); params.push(String(banner_url)); }
+  if (genre) { updates.push("genre = ?"); params.push(String(genre)); }
+  if (location !== undefined) { updates.push("location = ?"); params.push(String(location).slice(0, 80)); }
+  if (social_links) { updates.push("social_links = ?"); params.push(JSON.stringify(social_links)); }
+  if (!updates.length) return res.status(400).json({ error: "Rien à mettre à jour." });
+  params.push(req.user.id);
+  db.prepare(`UPDATE users SET ${updates.join(", ")} WHERE id = ?`).run(...params);
+  res.json({ ok: true });
+});
+
+// Add artist to roster
+dashboardsRouter.post("/label/roster/add", authMiddleware, (req, res) => {
+  if (!requireRole(req, res, ["label", "admin"])) return;
+  const { email } = req.body;
+  if (!email) return res.status(400).json({ error: "Email requis." });
+  const artist = db.prepare("SELECT id, name, email, avatar_url FROM users WHERE email = ?").get(email.toLowerCase().trim());
+  if (!artist) return res.status(404).json({ error: "Aucun artiste trouvé avec cet email." });
+  if (artist.id === req.user.id) return res.status(400).json({ error: "Tu ne peux pas t'ajouter toi-même." });
+  const existing = db.prepare("SELECT 1 FROM label_members WHERE label_id = ? AND artist_id = ?").get(req.user.id, artist.id);
+  if (existing) return res.status(409).json({ error: "Artiste déjà dans le roster." });
+  db.prepare("INSERT INTO label_members (label_id, artist_id, role) VALUES (?, ?, 'artist')").run(req.user.id, artist.id);
+  db.prepare("INSERT INTO audit_logs (id, actor_id, action, entity_type, entity_id, details) VALUES (?, ?, 'label.add_artist', 'user', ?, ?)").run(`log_${Date.now()}`, req.user.id, artist.id, email);
+  res.json({ ok: true, artist });
+});
+
+// Remove artist from roster
+dashboardsRouter.delete("/label/roster/:artistId", authMiddleware, (req, res) => {
+  if (!requireRole(req, res, ["label", "admin"])) return;
+  db.prepare("DELETE FROM label_members WHERE label_id = ? AND artist_id = ?").run(req.user.id, req.params.artistId);
+  res.json({ ok: true });
+});
+
 // Payout action (admin only)
 dashboardsRouter.patch("/admin/payouts/:id", authMiddleware, (req, res) => {
   if (!requireRole(req, res, ["admin"])) return;

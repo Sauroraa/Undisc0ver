@@ -1724,3 +1724,405 @@ function AdminSettings({ notify }) {
     </div>
   );
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// LABEL DASHBOARD
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export function LabelDashboard({ notify }) {
+  const { user } = window.__undiscover_auth_ctx || {};
+  const [section, setSection] = useState("overview");
+  const [refreshKey, setRefreshKey] = useState(0);
+  const { data, loading, error } = window.__undiscover_use_data(`/dashboards/label`, [user?.id, refreshKey]);
+
+  if (!user) return <div className="db-auth-required"><Lock size={32} /><p>Connexion requise.</p></div>;
+  if (!["label", "admin"].includes(user.role)) return <div className="db-auth-required"><ShieldAlert size={32} /><p>Accès Label requis.</p></div>;
+
+  const refresh = () => setRefreshKey(k => k + 1);
+
+  const items = [
+    ["overview",  "Vue d'ensemble", HomeIcon],
+    ["branding",  "Identité du label", Star],
+    ["roster",    "Artistes",        Users],
+    ["catalog",   "Catalogue",       Music2],
+    ["analytics", "Analytics",       BarChart3],
+    ["campaigns", "Campagnes",       Zap],
+  ];
+
+  return (
+    <DashboardShell sidebar={
+      <Sidebar title="Label Dashboard" subtitle={user.name} items={items} section={section} setSection={setSection}
+        footer={
+          <div className="db-sidebar-footer">
+            <span className="role-chip role-label">label</span>
+            <a href="/dashboard"><HomeIcon size={14} /> Retour</a>
+          </div>
+        }
+      />
+    }>
+      {loading ? <div className="db-loading"><Loader2 className="spin" size={28} /></div> :
+       error ? <AlertCard type="error" title="Erreur" text={error} /> : (
+        <>
+          {section === "overview"  && <LabelOverview data={data} />}
+          {section === "branding"  && <LabelBranding profile={data.profile} notify={notify} onRefresh={refresh} />}
+          {section === "roster"    && <LabelRoster roster={data.roster} notify={notify} onRefresh={refresh} />}
+          {section === "catalog"   && <LabelCatalog catalog={data.catalog} notify={notify} onRefresh={refresh} />}
+          {section === "analytics" && <LabelAnalytics stats={data.stats} series={data.series} roster={data.roster} catalog={data.catalog} />}
+          {section === "campaigns" && <LabelCampaigns campaigns={data.campaigns} />}
+        </>
+      )}
+    </DashboardShell>
+  );
+}
+
+function LabelOverview({ data }) {
+  const { stats, roster, catalog, series } = data;
+  const topArtist = roster[0];
+  const recentReleases = catalog.slice(0, 5);
+
+  return (
+    <div className="db-section">
+      <SectionHeader title="Vue d'ensemble" subtitle="Activité globale de ton label." />
+
+      <div className="stat-grid">
+        <StatCard label="Artistes roster" value={fmtNum(stats.total_artists)} icon={Users} color="#22c55e" />
+        <StatCard label="Tracks publiées" value={fmtNum(stats.total_releases)} icon={Music2} color="#3b82f6" />
+        <StatCard label="Écoutes totales" value={fmtNum(stats.plays)} icon={Headphones} color="#8b5cf6" series={series.plays} />
+        <StatCard label="Followers combinés" value={fmtNum(stats.total_followers)} icon={UserPlus} color="#f59e0b" />
+        <StatCard label="Ventes" value={fmtNum(stats.sales)} icon={DollarSign} color="#06b6d4" />
+        <StatCard label="Revenus" value={fmt(stats.revenue_cents)} icon={Wallet} color="#22c55e" />
+      </div>
+
+      <div className="db-two-col">
+        <div className="db-chart-card">
+          <div className="chart-head"><Headphones size={15} /><span>Écoutes — 30 jours (tous artistes)</span></div>
+          <LineChart data={series.plays} color="#8b5cf6" />
+        </div>
+        <div className="db-chart-card">
+          <div className="chart-head"><Users size={15} /><span>Roster — performance</span></div>
+          {roster.length === 0 ? <EmptyState icon={Users} title="Aucun artiste" text="Ajoute des artistes dans l'onglet Roster." /> : (
+            <div className="label-roster-mini">
+              {roster.slice(0, 6).map(a => (
+                <div key={a.id} className="lrm-row">
+                  <div className="db-thumb sm" style={{ backgroundImage: a.avatar_url ? `url(${a.avatar_url})` : undefined, borderRadius: "50%" }}>{!a.avatar_url && <Users size={10} />}</div>
+                  <span className="lrm-name">{a.name}</span>
+                  <span className="lrm-plays">{fmtNum(a.total_plays)} écoutes</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="db-chart-card">
+        <div className="chart-head"><Music2 size={15} /><span>Sorties récentes</span></div>
+        {recentReleases.length === 0 ? <EmptyState icon={Music2} title="Aucune release" /> : (
+          <div className="db-table-wrap" style={{ border: "none" }}>
+            <table className="db-table">
+              <thead><tr><th>Track</th><th>Artiste</th><th>Statut</th><th>Écoutes</th><th>Revenus</th></tr></thead>
+              <tbody>
+                {recentReleases.map(r => (
+                  <tr key={r.id}>
+                    <td><div className="db-release-cell"><div className="db-thumb sm" style={{ backgroundImage: r.cover_url ? `url(${r.cover_url})` : undefined }}>{!r.cover_url && <Music2 size={10} />}</div><strong>{r.title}</strong></div></td>
+                    <td>{r.artist_name}</td>
+                    <td><StatusBadge status={r.moderation_status} /></td>
+                    <td>{fmtNum(r.plays)}</td>
+                    <td style={{ color: "#22c55e" }}>{fmt(r.revenue_cents)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function LabelBranding({ profile, notify, onRefresh }) {
+  const [form, setForm] = useState({
+    name: profile?.name || "",
+    bio: profile?.bio || "",
+    avatar_url: profile?.avatar_url || "",
+    banner_url: profile?.banner_url || "",
+    genre: profile?.genre || "",
+    location: profile?.location || "",
+  });
+  const [saving, setSaving] = useState(false);
+  const update = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await window.__undiscover_request("/dashboards/label/branding", { method: "PATCH", body: JSON.stringify(form) });
+      notify("Profil du label mis à jour."); onRefresh();
+    } catch (e) { notify(e.message); } finally { setSaving(false); }
+  };
+
+  return (
+    <div className="db-section">
+      <SectionHeader title="Identité du label" subtitle="Personnalise l'image et le profil public de ton label." />
+
+      <div className="label-branding-grid">
+        {/* Preview */}
+        <div className="label-preview-card">
+          <div className="lp-banner" style={{ backgroundImage: form.banner_url ? `url(${form.banner_url})` : undefined }}>
+            {!form.banner_url && <span className="lp-banner-empty">Bannière</span>}
+          </div>
+          <div className="lp-body">
+            <div className="lp-avatar" style={{ backgroundImage: form.avatar_url ? `url(${form.avatar_url})` : undefined }}>
+              {!form.avatar_url && <Star size={20} />}
+            </div>
+            <strong>{form.name || "Nom du label"}</strong>
+            <p>{form.bio || "Bio du label…"}</p>
+            <span>{form.genre} · {form.location}</span>
+          </div>
+        </div>
+
+        {/* Form */}
+        <div className="label-branding-form">
+          <div className="lb-field"><label>Nom du label</label><input value={form.name} onChange={e => update("name", e.target.value)} placeholder="Ex: Future Records" /></div>
+          <div className="lb-field"><label>Bio</label><textarea value={form.bio} onChange={e => update("bio", e.target.value)} placeholder="Présente ton label en quelques lignes…" rows={4} /></div>
+          <div className="lb-row2">
+            <div className="lb-field"><label>Genre principal</label><input value={form.genre} onChange={e => update("genre", e.target.value)} placeholder="Ex: Afrobeats" /></div>
+            <div className="lb-field"><label>Localisation</label><input value={form.location} onChange={e => update("location", e.target.value)} placeholder="Ex: Paris, FR" /></div>
+          </div>
+          <div className="lb-field"><label>URL Logo / Avatar</label><input value={form.avatar_url} onChange={e => update("avatar_url", e.target.value)} placeholder="https://…" /></div>
+          <div className="lb-field"><label>URL Bannière</label><input value={form.banner_url} onChange={e => update("banner_url", e.target.value)} placeholder="https://…" /></div>
+          <button className="button accent" onClick={save} disabled={saving} type="button" style={{ marginTop: 8 }}>
+            {saving ? <Loader2 size={15} className="spin" /> : <CheckCircle2 size={15} />}
+            {saving ? "Sauvegarde…" : "Sauvegarder le profil"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function LabelRoster({ roster, notify, onRefresh }) {
+  const [email, setEmail] = useState("");
+  const [adding, setAdding] = useState(false);
+  const [removing, setRemoving] = useState("");
+
+  const addArtist = async () => {
+    if (!email.trim()) return;
+    setAdding(true);
+    try {
+      await window.__undiscover_request("/dashboards/label/roster/add", { method: "POST", body: JSON.stringify({ email }) });
+      notify("Artiste ajouté au roster."); setEmail(""); onRefresh();
+    } catch (e) { notify(e.message); } finally { setAdding(false); }
+  };
+
+  const removeArtist = async (artistId, name) => {
+    if (!confirm(`Retirer ${name} du roster ?`)) return;
+    setRemoving(artistId);
+    try {
+      await window.__undiscover_request(`/dashboards/label/roster/${artistId}`, { method: "DELETE" });
+      notify("Artiste retiré du roster."); onRefresh();
+    } catch (e) { notify(e.message); } finally { setRemoving(""); }
+  };
+
+  return (
+    <div className="db-section">
+      <SectionHeader title="Artistes du roster" subtitle={`${roster.length} artiste(s) dans ton label.`} />
+
+      <div className="label-add-artist">
+        <div className="db-search-wrap" style={{ flex: 1 }}>
+          <Search size={14} />
+          <input value={email} onChange={e => setEmail(e.target.value)} placeholder="Email de l'artiste à ajouter…" onKeyDown={e => e.key === "Enter" && addArtist()} />
+        </div>
+        <button className="button accent" onClick={addArtist} disabled={adding || !email.trim()} type="button">
+          {adding ? <Loader2 size={14} className="spin" /> : <UserPlus size={14} />} Ajouter
+        </button>
+      </div>
+
+      {roster.length === 0 ? (
+        <EmptyState icon={Users} title="Roster vide" text="Ajoute des artistes par leur email pour constituer ton roster." />
+      ) : (
+        <div className="db-table-wrap">
+          <table className="db-table">
+            <thead><tr><th>Artiste</th><th>Genre</th><th>Tracks</th><th>Écoutes</th><th>Revenus</th><th>Ajouté</th><th>Actions</th></tr></thead>
+            <tbody>
+              {roster.map(a => (
+                <tr key={a.id}>
+                  <td>
+                    <div className="db-release-cell">
+                      <div className="db-thumb" style={{ backgroundImage: a.avatar_url ? `url(${a.avatar_url})` : undefined, borderRadius: "50%" }}>{!a.avatar_url && <Users size={12} />}</div>
+                      <div><strong>{a.name}</strong><small>{a.location}</small></div>
+                    </div>
+                  </td>
+                  <td><span className="db-tag">{a.genre}</span></td>
+                  <td>{fmtNum(a.releases_count)}</td>
+                  <td>{fmtNum(a.total_plays)}</td>
+                  <td style={{ color: "#22c55e" }}>{fmt(a.total_revenue)}</td>
+                  <td>{timeAgo(a.added_at)}</td>
+                  <td>
+                    <div className="db-actions">
+                      <a href={`/artist/${a.id}`} className="button ghost mini"><Eye size={12} /></a>
+                      <button className="button ghost mini danger" onClick={() => removeArtist(a.id, a.name)} disabled={removing === a.id} type="button"><Trash size={12} /></button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LabelCatalog({ catalog, notify, onRefresh }) {
+  const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState("all");
+
+  const filtered = catalog.filter(r => {
+    if (search && !r.title.toLowerCase().includes(search.toLowerCase()) && !r.artist_name.toLowerCase().includes(search.toLowerCase())) return false;
+    if (filter === "paid" && !r.price_cents) return false;
+    if (filter === "free" && r.price_cents) return false;
+    if (filter === "published" && r.moderation_status !== "published") return false;
+    if (filter === "review" && r.moderation_status !== "review") return false;
+    return true;
+  });
+
+  return (
+    <div className="db-section">
+      <SectionHeader title="Catalogue" subtitle={`${catalog.length} releases dans ton label.`} />
+      <FilterBar value={search} onChange={setSearch} placeholder="Titre, artiste…">
+        <select value={filter} onChange={e => setFilter(e.target.value)}>
+          <option value="all">Toutes</option>
+          <option value="published">Publiées</option>
+          <option value="review">En revue</option>
+          <option value="paid">Payantes</option>
+          <option value="free">Gratuites</option>
+        </select>
+      </FilterBar>
+
+      {!filtered.length ? <EmptyState icon={Music2} title="Aucune release" text="Le catalogue est vide. Ajoute des artistes ou upload des tracks." /> : (
+        <div className="db-table-wrap">
+          <table className="db-table">
+            <thead><tr><th>Track</th><th>Artiste</th><th>Type</th><th>Statut</th><th>Écoutes</th><th>Likes</th><th>Prix</th><th>Revenus</th></tr></thead>
+            <tbody>
+              {filtered.map(r => (
+                <tr key={r.id}>
+                  <td>
+                    <div className="db-release-cell">
+                      <div className="db-thumb" style={{ backgroundImage: r.cover_url ? `url(${r.cover_url})` : undefined }}>{!r.cover_url && <Music2 size={10} />}</div>
+                      <div><strong>{r.title}</strong><small>{r.kind}</small></div>
+                    </div>
+                  </td>
+                  <td>{r.artist_name}</td>
+                  <td><span className="db-tag">{r.genre}</span></td>
+                  <td><StatusBadge status={r.moderation_status} /></td>
+                  <td>{fmtNum(r.plays)}</td>
+                  <td>{fmtNum(r.likes)}</td>
+                  <td>{r.price_cents ? fmt(r.price_cents) : "Gratuit"}</td>
+                  <td style={{ color: "#22c55e" }}>{fmt(r.revenue_cents)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LabelAnalytics({ stats, series, roster, catalog }) {
+  const topByPlays = [...roster].sort((a, b) => b.total_plays - a.total_plays).slice(0, 8);
+  const topByRevenue = [...roster].sort((a, b) => b.total_revenue - a.total_revenue).slice(0, 5);
+
+  return (
+    <div className="db-section">
+      <SectionHeader title="Analytics label" subtitle="Stats combinées de tous tes artistes." />
+
+      <div className="stat-grid">
+        <StatCard label="Écoutes totales" value={fmtNum(stats.plays)} icon={Headphones} color="#8b5cf6" />
+        <StatCard label="Followers combinés" value={fmtNum(stats.total_followers)} icon={Users} color="#22c55e" />
+        <StatCard label="Téléchargements" value={fmtNum(stats.downloads)} icon={Download} color="#3b82f6" />
+        <StatCard label="Revenus totaux" value={fmt(stats.revenue_cents)} icon={Wallet} color="#f59e0b" />
+      </div>
+
+      <div className="db-chart-card">
+        <div className="chart-head"><Headphones size={15} /><span>Écoutes combinées — 30 jours</span></div>
+        <LineChart data={series.plays} color="#8b5cf6" />
+      </div>
+
+      <div className="db-two-col">
+        <div className="db-chart-card">
+          <div className="chart-head"><TrendingUp size={15} /><span>Top artistes — Écoutes</span></div>
+          {topByPlays.length === 0 ? <EmptyState icon={Users} title="Aucun artiste" /> : (
+            <div className="label-bar-list">
+              {topByPlays.map((a, i) => {
+                const maxPlays = topByPlays[0]?.total_plays || 1;
+                return (
+                  <div key={a.id} className="lbl-row">
+                    <span className="lbl-rank">#{i + 1}</span>
+                    <div className="db-thumb sm" style={{ backgroundImage: a.avatar_url ? `url(${a.avatar_url})` : undefined, borderRadius: "50%" }}>{!a.avatar_url && <Users size={8} />}</div>
+                    <span className="lbl-name">{a.name}</span>
+                    <div className="lbl-bar-wrap"><div className="lbl-bar" style={{ width: `${(a.total_plays / maxPlays) * 100}%` }} /></div>
+                    <span className="lbl-val">{fmtNum(a.total_plays)}</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+        <div className="db-chart-card">
+          <div className="chart-head"><Wallet size={15} /><span>Top artistes — Revenus</span></div>
+          {topByRevenue.length === 0 ? <EmptyState icon={DollarSign} title="Aucune vente" /> : (
+            <div className="label-bar-list">
+              {topByRevenue.map((a, i) => {
+                const maxRev = topByRevenue[0]?.total_revenue || 1;
+                return (
+                  <div key={a.id} className="lbl-row">
+                    <span className="lbl-rank">#{i + 1}</span>
+                    <span className="lbl-name">{a.name}</span>
+                    <div className="lbl-bar-wrap"><div className="lbl-bar" style={{ width: `${(a.total_revenue / maxRev) * 100}%`, background: "#22c55e" }} /></div>
+                    <span className="lbl-val" style={{ color: "#22c55e" }}>{fmt(a.total_revenue)}</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function LabelCampaigns({ campaigns }) {
+  const active = campaigns.filter(c => c.status === "active");
+  const totalImpressions = campaigns.reduce((s, c) => s + (c.impressions || 0), 0);
+  const totalClicks = campaigns.reduce((s, c) => s + (c.clicks || 0), 0);
+  return (
+    <div className="db-section">
+      <SectionHeader title="Campagnes" subtitle="Toutes les campagnes de tes artistes." />
+      <div className="stat-grid">
+        <StatCard label="Campagnes actives" value={active.length} icon={Zap} color="#22c55e" />
+        <StatCard label="Impressions totales" value={fmtNum(totalImpressions)} icon={Eye} color="#3b82f6" />
+        <StatCard label="Clics totaux" value={fmtNum(totalClicks)} icon={Activity} color="#f59e0b" />
+      </div>
+      {!campaigns.length ? <EmptyState icon={Zap} title="Aucune campagne" text="Tes artistes n'ont pas encore lancé de campagnes." /> : (
+        <div className="db-table-wrap">
+          <table className="db-table">
+            <thead><tr><th>Campagne</th><th>Artiste</th><th>Type</th><th>Statut</th><th>Impressions</th><th>Clics</th><th>Budget</th></tr></thead>
+            <tbody>
+              {campaigns.map(c => (
+                <tr key={c.id}>
+                  <td><strong>{c.title}</strong>{c.release_title && <small> · {c.release_title}</small>}</td>
+                  <td>{c.artist_name}</td>
+                  <td><span className="db-tag">{c.campaign_type}</span></td>
+                  <td><StatusBadge status={c.status} /></td>
+                  <td>{fmtNum(c.impressions)}</td>
+                  <td>{fmtNum(c.clicks)}</td>
+                  <td>{fmt(c.budget_cents)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}

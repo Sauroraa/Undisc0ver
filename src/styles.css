@@ -6353,6 +6353,61 @@ textarea { min-height: 120px; resize: vertical; }
   line-height: 1.45;
   margin: 0;
 }
+/* ── Label Dashboard ─────────────────────────────────────────────────────────── */
+
+/* Roster mini in overview */
+.label-roster-mini { display: flex; flex-direction: column; gap: 8px; }
+.lrm-row { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+.lrm-name { flex: 1; font-weight: 600; }
+.lrm-plays { font-size: 12px; color: var(--muted); }
+
+/* Add artist bar */
+.label-add-artist { display: flex; align-items: center; gap: 10px; }
+
+/* Branding grid */
+.label-branding-grid { display: grid; grid-template-columns: 260px 1fr; gap: 24px; }
+@media (max-width: 720px) { .label-branding-grid { grid-template-columns: 1fr; } }
+
+/* Label preview card */
+.label-preview-card { background: var(--elevated); border: 1px solid var(--border); border-radius: 14px; overflow: hidden; }
+.lp-banner {
+  height: 90px; background: linear-gradient(135deg, rgba(212,232,87,.15), rgba(139,92,246,.15));
+  background-size: cover; background-position: center;
+  display: flex; align-items: center; justify-content: center;
+}
+.lp-banner-empty { font-size: 11px; color: var(--muted); }
+.lp-body { padding: 0 16px 16px; }
+.lp-avatar {
+  width: 56px; height: 56px; border-radius: 50%;
+  background: var(--surface) center/cover;
+  border: 3px solid var(--elevated);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--accent); margin-top: -28px; margin-bottom: 10px;
+}
+.lp-body strong { display: block; font-size: 15px; font-weight: 700; }
+.lp-body p { font-size: 12px; color: var(--muted); margin: 4px 0; line-height: 1.4; }
+.lp-body span { font-size: 11px; color: var(--muted); }
+
+/* Branding form */
+.label-branding-form { display: flex; flex-direction: column; gap: 14px; }
+.lb-field { display: flex; flex-direction: column; gap: 5px; }
+.lb-field label { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+.lb-field input, .lb-field textarea {
+  background: var(--base); border: 1px solid var(--border); border-radius: 8px;
+  color: var(--text); font-size: 13px; padding: 9px 12px; font-family: inherit; resize: vertical;
+}
+.lb-field input:focus, .lb-field textarea:focus { outline: none; border-color: var(--accent); }
+.lb-row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+/* Analytics bar list */
+.label-bar-list { display: flex; flex-direction: column; gap: 10px; margin-top: 4px; }
+.lbl-row { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.lbl-rank { width: 24px; flex-shrink: 0; color: var(--muted); font-weight: 700; font-size: 11px; }
+.lbl-name { flex: 0 0 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lbl-bar-wrap { flex: 1; height: 6px; background: var(--elevated); border-radius: 3px; overflow: hidden; }
+.lbl-bar { height: 100%; background: var(--accent); border-radius: 3px; min-width: 4px; transition: width .4s; }
+.lbl-val { flex-shrink: 0; color: var(--muted); width: 60px; text-align: right; }
+
 /* ── Live Support widget ─────────────────────────────────────────────────────── */
 .ls-root {
   position: fixed;

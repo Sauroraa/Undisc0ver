@@ -403,6 +403,13 @@ export function initDb() {
       last_seen TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       PRIMARY KEY (session_hash, campaign_id)
     );
+    CREATE TABLE IF NOT EXISTS label_members (
+      label_id   TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      artist_id  TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      role       TEXT NOT NULL DEFAULT 'artist',
+      added_at   TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (label_id, artist_id)
+    );
   `);
 
   const userColumns = db.prepare("PRAGMA table_info(users)").all().map((column) => column.name);
