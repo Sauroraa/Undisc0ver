@@ -1267,11 +1267,44 @@ app.put("/api/me/testimonial", auth, (req, res) => {
   res.json({ testimonial: db.prepare("SELECT quote, role, visible, updated_at FROM testimonials WHERE user_id = ?").get(req.user.id) });
 });
 
+app.get("/api/support/tickets", auth, (req, res) => {
+  const tickets = db.prepare(`
+    SELECT id, topic, message, status, assignee_role, created_at
+    FROM support_tickets
+    WHERE user_id = ?
+    ORDER BY created_at DESC
+    LIMIT 50
+  `).all(req.user.id);
+  const messagesByTicket = new Map();
+  if (tickets.length) {
+    const placeholders = tickets.map(() => "?").join(",");
+    const messages = db.prepare(`
+      SELECT tm.id, tm.ticket_id, tm.sender_type, tm.body, tm.created_at, u.name sender_name
+      FROM ticket_messages tm
+      LEFT JOIN users u ON u.id = tm.sender_id
+      WHERE tm.ticket_id IN (${placeholders})
+      ORDER BY tm.created_at ASC
+    `).all(...tickets.map((ticket) => ticket.id));
+    for (const message of messages) {
+      const thread = messagesByTicket.get(message.ticket_id) || [];
+      thread.push(message);
+      messagesByTicket.set(message.ticket_id, thread);
+    }
+  }
+  const presented = tickets.map((ticket) => ({ ...ticket, messages: messagesByTicket.get(ticket.id) || [] }));
+  const activeCount = tickets.filter((ticket) => ["open", "pending"].includes(ticket.status)).length;
+  res.json({ tickets: presented, active_count: activeCount, max_active: 2, can_create: activeCount < 2 });
+});
+
 app.post("/api/support/tickets", rateLimiter(5, 60 * 60_000), (req, res) => {
   const { name, email, topic, message } = req.body;
   if (!name || !email || !topic || !message) return res.status(400).json({ error: "Nom, email, sujet et message requis." });
   if (!isValidEmail(email)) return res.status(400).json({ error: "Adresse email invalide." });
   const userId = req.headers.authorization ? db.prepare("SELECT user_id FROM sessions WHERE token = ?").get(req.headers.authorization.replace("Bearer ", ""))?.user_id : null;
+  const activeCount = userId
+    ? db.prepare("SELECT COUNT(*) total FROM support_tickets WHERE user_id = ? AND status IN ('open', 'pending')").get(userId).total
+    : db.prepare("SELECT COUNT(*) total FROM support_tickets WHERE lower(email) = lower(?) AND status IN ('open', 'pending')").get(String(email).trim()).total;
+  if (activeCount >= 2) return res.status(409).json({ error: "Tu as déjà 2 tickets actifs. Attends la clôture d'un ticket avant d'en ouvrir un autre.", code: "active_ticket_limit" });
   const ticketId = id("sup");
   db.prepare("INSERT INTO support_tickets (id, user_id, name, email, topic, message) VALUES (?, ?, ?, ?, ?, ?)")
     .run(ticketId, userId || null, name, email, topic, message);
@@ -1281,7 +1314,7 @@ app.post("/api/support/tickets", rateLimiter(5, 60 * 60_000), (req, res) => {
   const ticketUser = userId ? db.prepare("SELECT * FROM users WHERE id = ?").get(userId) : null;
   const ticketEmailContent = supportTicketEmail(ticketUser || { name }, { id: ticketId, topic });
   sendEmail({ to: email, ...ticketEmailContent }).catch(() => {});
-  res.json({ ok: true, ticket: { id: ticketId, status: "open" } });
+  res.json({ ok: true, ticket: { id: ticketId, status: "open" }, active_count: activeCount + 1, max_active: 2 });
 });
 
 app.post("/api/careers/apply", rateLimiter(3, 60 * 60_000), (req, res) => {

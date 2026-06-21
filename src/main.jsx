@@ -2256,11 +2256,29 @@ function LiveSupport({ notify }) {
   const [form, setForm] = useState({ name: "", email: "", topic: "", message: "" });
   const [sending, setSending] = useState(false);
   const [ticket, setTicket] = useState(null);
+  const [history, setHistory] = useState({ tickets: [], active_count: 0, max_active: 2, can_create: true });
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [selectedTicket, setSelectedTicket] = useState(null);
+
+  const loadHistory = async () => {
+    if (!user) return;
+    setHistoryLoading(true);
+    try {
+      const data = await request("/support/tickets");
+      setHistory(data);
+      setSelectedTicket((current) => current ? data.tickets.find((item) => item.id === current.id) || null : null);
+    } catch { /* The creation form remains available if history cannot load. */ }
+    finally { setHistoryLoading(false); }
+  };
 
   // Auto-fill when user logs in
   useEffect(() => {
     if (user) setForm(f => ({ ...f, name: f.name || user.name || "", email: f.email || user.email || "" }));
   }, [user?.id]);
+
+  useEffect(() => {
+    if (open && user) loadHistory();
+  }, [open, user?.id]);
 
   const update = (key, val) => setForm(f => ({ ...f, [key]: val }));
 
@@ -2273,6 +2291,7 @@ function LiveSupport({ notify }) {
       const data = await request("/support/tickets", { method: "POST", body: JSON.stringify(form) });
       setTicket(data.ticket);
       setStep("done");
+      if (user) loadHistory();
       notify("Ticket envoyé. L'équipe répond sous 24h.");
     } catch (err) { notify(err.message); }
     finally { setSending(false); }
@@ -2283,6 +2302,7 @@ function LiveSupport({ notify }) {
   const charLeft = 600 - (form.message?.length || 0);
 
   const currentTopic = LS_TOPICS.find(t => t.id === form.topic);
+  const atTicketLimit = user && !history.can_create;
 
   return (
     <div className="ls-root">
@@ -2307,16 +2327,42 @@ function LiveSupport({ notify }) {
             {/* Step 1 : topic */}
             {step === "topic" && (
               <div className="ls-step ls-step-topic">
+                {user && (
+                  <button className="ls-history-link" onClick={() => setStep("history")} type="button">
+                    <Clock size={14} /> Mes tickets
+                    <span>{history.active_count}/{history.max_active} actifs</span>
+                    <ChevronRight size={14} />
+                  </button>
+                )}
+                {atTicketLimit && <p className="ls-limit-note"><AlertTriangle size={14} /> Deux tickets sont déjà actifs. Consulte leur suivi avant d'en créer un autre.</p>}
                 <p className="ls-intro">Quel est le sujet de ta demande ?</p>
                 <div className="ls-topics">
                   {LS_TOPICS.map(({ id, label, icon: Icon, desc }) => (
-                    <button key={id} className="ls-topic-btn" onClick={() => selectTopic(id)} type="button">
+                    <button key={id} className="ls-topic-btn" onClick={() => selectTopic(id)} type="button" disabled={atTicketLimit}>
                       <span className="ls-topic-icon"><Icon size={15} /></span>
                       <div className="ls-topic-text"><strong>{label}</strong><span>{desc}</span></div>
                       <ChevronRight size={14} className="ls-topic-arrow" />
                     </button>
                   ))}
                 </div>
+              </div>
+            )}
+
+            {step === "history" && (
+              <div className="ls-step ls-step-history">
+                <button className="ls-back" onClick={() => { setSelectedTicket(null); setStep("topic"); }} type="button"><ChevronLeft size={14} /> Mes tickets</button>
+                {historyLoading ? <div className="ls-history-empty"><Loader2 className="spin" size={20} /></div> : selectedTicket ? (
+                  <div className="ls-ticket-detail">
+                    <button className="ls-ticket-return" onClick={() => setSelectedTicket(null)} type="button"><ChevronLeft size={13} /> Tous les tickets</button>
+                    <div className="ls-ticket-title"><strong>{selectedTicket.topic}</strong><span className={`ls-ticket-status ${selectedTicket.status}`}>{selectedTicket.status}</span></div>
+                    <small>#{selectedTicket.id.slice(-8)} · {new Date(selectedTicket.created_at).toLocaleDateString("fr-FR")}</small>
+                    <div className="ls-ticket-thread">
+                      {selectedTicket.messages.map((message) => <article className={`ls-ticket-message ${message.sender_type}`} key={message.id}><b>{message.sender_type === "staff" ? message.sender_name || "Support" : message.sender_type === "system" ? "Undisc0ver" : "Toi"}</b><p>{message.body}</p><time>{new Date(message.created_at).toLocaleString("fr-FR")}</time></article>)}
+                    </div>
+                  </div>
+                ) : history.tickets.length ? (
+                  <div className="ls-ticket-list">{history.tickets.map((item) => <button key={item.id} onClick={() => setSelectedTicket(item)} type="button"><div><strong>{item.topic}</strong><small>#{item.id.slice(-8)} · {new Date(item.created_at).toLocaleDateString("fr-FR")}</small></div><span className={`ls-ticket-status ${item.status}`}>{item.status}</span><ChevronRight size={14} /></button>)}</div>
+                ) : <div className="ls-history-empty"><MessageCircle size={24} /><p>Aucun ticket précédent.</p></div>}
               </div>
             )}
 
@@ -2366,7 +2412,7 @@ function LiveSupport({ notify }) {
                 <div className="ls-done-icon"><CircleCheck size={36} /></div>
                 <strong>Ticket envoyé !</strong>
                 <p>Ton ticket <code>#{ticket?.id?.slice(-8)}</code> a bien été reçu. L'équipe te répondra par email sous 24h.</p>
-                <button className="ls-send ls-send-ghost" onClick={reset} type="button">Nouvelle demande</button>
+                <button className="ls-send ls-send-ghost" onClick={history.active_count >= history.max_active ? () => setStep("history") : reset} type="button">{history.active_count >= history.max_active ? "Voir mes tickets" : "Nouvelle demande"}</button>
               </div>
             )}
 
