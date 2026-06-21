@@ -4431,15 +4431,15 @@ function ReleaseDetail({ id, notify, playRelease }) {
             </button>
             <button className="button ghost rd-action-btn" onClick={copyLink}><Copy size={15} /> Partager</button>
             <button className="button ghost rd-action-btn icon-only" onClick={() => setReportOpen((v) => !v)} title="Signaler"><ShieldAlert size={15} /></button>
+            {release.free && release.download_enabled ? <ReleaseDownloadGate release={release} notify={notify} /> : null}
           </div>
 
           {showPlaylist && <QuickAddToPlaylist releaseId={release.id} notify={notify} onClose={() => setShowPlaylist(false)} />}
 
           {/* Download / Buy */}
           <div className="rd-download-zone">
-            {release.free
-              ? <ReleaseDownloadGate release={release} notify={notify} />
-              : (
+            {!release.free
+              ? (
                 <div className="rd-buy-block">
                   <div className="rd-buy-info">
                     <ShieldCheck size={16} />
@@ -4448,7 +4448,8 @@ function ReleaseDetail({ id, notify, playRelease }) {
                   </div>
                   <BuyButton release={release} notify={notify} />
                 </div>
-              )}
+              )
+              : null}
           </div>
 
           {/* Stats chips */}
@@ -4461,7 +4462,9 @@ function ReleaseDetail({ id, notify, playRelease }) {
         </div>
       </div>
 
-      {/* ── BODY: description + comments ── */}
+      {/* Community first, secondary release details below. */}
+      <ReleaseComments release={release} initialComments={data.comments || []} notify={notify} />
+
       <div className="rd-body">
         <div className="rd-about">
           {release.description && (
@@ -4477,7 +4480,6 @@ function ReleaseDetail({ id, notify, playRelease }) {
           </div>
         </div>
 
-        <ReleaseComments release={release} initialComments={data.comments || []} notify={notify} />
       </div>
     </main>
   );
@@ -4533,7 +4535,11 @@ function ReleaseComments({ release, initialComments, notify }) {
 
   return (
     <section className="rd-comments">
-      <h2 className="rd-comments-title"><MessageCircle size={18} /> Commentaires <span>{comments.length}</span></h2>
+      <div className="rd-comments-heading">
+        <span className="eyebrow">La communauté</span>
+        <h2 className="rd-comments-title"><MessageCircle size={22} /> Commentaires <span>{comments.length}</span></h2>
+        <p>Réagis à la release et échange directement avec l'artiste.</p>
+      </div>
 
       {user ? (
         <form className="rd-comment-form" onSubmit={submit}>
@@ -6261,17 +6267,30 @@ function LikeButton({ release, notify }) {
 
 function ReleaseDownloadGate({ release, notify }) {
   const { user } = useAuth();
+  const [open, setOpen] = useState(false);
   const { data, loading } = useData(user ? `/releases/${release.id}/gate` : "/health", [release.id, user?.id]);
-  if (!release.download_enabled) return <div className="download-disabled"><ShieldCheck size={16} /> Download disabled by artist. Streaming and release page stay public.</div>;
-  if (!user) return <a className="button accent" href="/login"><ArrowDownToLine size={16} /> Login to unlock download</a>;
-  if (loading) return <button className="button ghost" disabled><Loader2 className="spin" size={16} /> Checking gate...</button>;
+  if (!release.download_enabled) return null;
+  if (!user) return <a className="button accent rd-download-trigger" href="/login"><ArrowDownToLine size={16} /> Télécharger</a>;
+  if (loading) return <button className="button accent rd-download-trigger" disabled><Loader2 className="spin" size={16} /> Téléchargement</button>;
   const required = data?.required || [];
   const done = data?.done || [];
-  if (!required.length || data?.unlocked) return <DownloadButton release={release} notify={notify} />;
-  return <DownloadGateChecklist release={release} required={required} done={done} notify={notify} />;
+  if (!required.length || data?.unlocked) return <DownloadButton release={release} notify={notify} prominent />;
+  return (
+    <div className="rd-download-cta">
+      <button className="button accent rd-download-trigger" type="button" onClick={() => setOpen((value) => !value)} aria-expanded={open}>
+        <ArrowDownToLine size={16} /> Télécharger
+        <span>{done.length}/{required.length}</span>
+      </button>
+      {open && (
+        <div className="download-gate-popover">
+          <DownloadGateChecklist release={release} required={required} done={done} notify={notify} onClose={() => setOpen(false)} />
+        </div>
+      )}
+    </div>
+  );
 }
 
-function DownloadGateChecklist({ release, required, done, notify }) {
+function DownloadGateChecklist({ release, required, done, notify, onClose }) {
   const [state, setState] = useState({ done, comment: "", busy: "" });
   useEffect(() => {
     setState((current) => ({ ...current, done }));
@@ -6303,10 +6322,10 @@ function DownloadGateChecklist({ release, required, done, notify }) {
       <div className="gate-builder-head">
         <div>
           <span className="eyebrow">Download gateway</span>
-          <h3>Unlock WAV download</h3>
-          <p>Complete {required.length} selected action{required.length > 1 ? "s" : ""} to open the download.</p>
+          <h3>Débloquer le téléchargement</h3>
+          <p>{required.length} action{required.length > 1 ? "s" : ""} rapide{required.length > 1 ? "s" : ""} avant le WAV.</p>
         </div>
-        <strong>{state.done.length}/{required.length}</strong>
+        <div className="gate-head-actions"><strong>{state.done.length}/{required.length}</strong>{onClose && <button className="gate-close" type="button" onClick={onClose} aria-label="Fermer"><X size={16} /></button>}</div>
       </div>
       <div className="gate-check-list">
         {required.map((action) => (
@@ -6330,7 +6349,7 @@ function DownloadGateChecklist({ release, required, done, notify }) {
   );
 }
 
-function DownloadButton({ release, notify, compact = false }) {
+function DownloadButton({ release, notify, compact = false, prominent = false }) {
   const { user } = useAuth();
   const [downloading, setDownloading] = useState(false);
   const click = async () => {
@@ -6361,7 +6380,7 @@ function DownloadButton({ release, notify, compact = false }) {
     }
   };
   if (!release.download_enabled) return <button className="button ghost" disabled><ShieldCheck size={16} /> Stream only</button>;
-  return <button className="button ghost" onClick={click} disabled={downloading}>{downloading ? <Loader2 className="spin" size={16} /> : <ArrowDownToLine size={16} />} {downloading ? "Preparing..." : compact ? "WAV" : "Download WAV"}</button>;
+  return <button className={`button ${prominent ? "accent rd-download-trigger" : "ghost"}`} onClick={click} disabled={downloading}>{downloading ? <Loader2 className="spin" size={16} /> : <ArrowDownToLine size={16} />} {downloading ? "Préparation..." : prominent ? "Télécharger" : compact ? "WAV" : "Download WAV"}</button>;
 }
 
 function BuyButton({ release, notify, compact = false }) {
