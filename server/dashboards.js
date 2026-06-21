@@ -14,6 +14,13 @@ function requireRole(req, res, roles) {
   return true;
 }
 
+function requireLabelAccess(req, res) {
+  if (!req.user) { res.status(401).json({ error: "Authentification requise." }); return false; }
+  const hasAccess = String(req.user.plan || "").toLowerCase() === "label" || ["label", "admin"].includes(req.user.role);
+  if (!hasAccess) { res.status(403).json({ error: "Abonnement Label requis." }); return false; }
+  return true;
+}
+
 function authMiddleware(req, res, next) {
   const token = String(req.headers.authorization || "").replace(/^Bearer\s+/i, "");
   if (!token) return res.status(401).json({ error: "Authentification requise." });
@@ -628,7 +635,7 @@ dashboardsRouter.patch("/staff/tickets/:id", authMiddleware, (req, res) => {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 dashboardsRouter.get("/label", authMiddleware, (req, res) => {
-  if (!requireRole(req, res, ["label", "admin"])) return;
+  if (!requireLabelAccess(req, res)) return;
   const labelId = req.user.id;
 
   // Label profile (from users table)
@@ -709,7 +716,7 @@ dashboardsRouter.get("/label", authMiddleware, (req, res) => {
 
 // Update label branding
 dashboardsRouter.patch("/label/branding", authMiddleware, (req, res) => {
-  if (!requireRole(req, res, ["label", "admin"])) return;
+  if (!requireLabelAccess(req, res)) return;
   const { name, bio, avatar_url, banner_url, genre, location, social_links } = req.body;
   const updates = [];
   const params = [];
@@ -728,7 +735,7 @@ dashboardsRouter.patch("/label/branding", authMiddleware, (req, res) => {
 
 // Add artist to roster
 dashboardsRouter.post("/label/roster/add", authMiddleware, (req, res) => {
-  if (!requireRole(req, res, ["label", "admin"])) return;
+  if (!requireLabelAccess(req, res)) return;
   const { email } = req.body;
   if (!email) return res.status(400).json({ error: "Email requis." });
   const artist = db.prepare("SELECT id, name, email, avatar_url FROM users WHERE email = ?").get(email.toLowerCase().trim());
@@ -743,7 +750,7 @@ dashboardsRouter.post("/label/roster/add", authMiddleware, (req, res) => {
 
 // Remove artist from roster
 dashboardsRouter.delete("/label/roster/:artistId", authMiddleware, (req, res) => {
-  if (!requireRole(req, res, ["label", "admin"])) return;
+  if (!requireLabelAccess(req, res)) return;
   db.prepare("DELETE FROM label_members WHERE label_id = ? AND artist_id = ?").run(req.user.id, req.params.artistId);
   res.json({ ok: true });
 });

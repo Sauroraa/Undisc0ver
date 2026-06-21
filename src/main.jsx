@@ -1279,6 +1279,10 @@ function subscriptionLabel(entity = {}) {
   return "Free";
 }
 
+function hasLabelSubscription(user = {}) {
+  return subscriptionValue(user) === "label" || user?.role === "label";
+}
+
 function staffRoleLabel(role = "") {
   const value = String(role || "").toLowerCase();
   if (value === "admin") return "Admin";
@@ -2603,6 +2607,7 @@ function UserMenu({ user, logout }) {
           <a href={artistPath(user)} onClick={closeMenu}>Profile</a>
           <a href="/settings" onClick={closeMenu}>Settings</a>
           <a href="/dashboard" onClick={closeMenu}>Dashboard artiste</a>
+          {hasLabelSubscription(user) && <a href="/dashboard/label" onClick={closeMenu}>Dashboard Label</a>}
           {["staff", "moderator", "admin"].includes(user.role) && <a href="/staff-dashboard" onClick={closeMenu}>Panel {user.role}</a>}
           <a href="/payouts" onClick={closeMenu}>Payouts</a>
           <button onClick={logoutAndClose}><LogOut size={15} /> Logout</button>
@@ -2974,7 +2979,7 @@ function SmartArtistDashboard({ notify, playRelease }) {
   const { user, loading } = useAuth();
   if (loading) return <main className="page"><div className="db-loading"><Loader2 className="spin" size={28} /></div></main>;
   if (!user) return <AuthPage mode="login" notify={notify} />;
-  if (user.role === "label") return <LabelDashboard notify={notify} />;
+  if (hasLabelSubscription(user)) return <LabelDashboard notify={notify} />;
   return <Dashboard notify={notify} playRelease={playRelease} section="overview" />;
 }
 
@@ -5751,7 +5756,7 @@ function DashboardSidebar({ section }) {
     { href: "/upload", label: "Upload release", icon: Upload },
     { href: "/settings", label: "Settings", icon: Settings },
     { href: "/pricing", label: "Plans", icon: CreditCard },
-    ...(user?.role === "label" ? [{ href: "/dashboard/label", label: "Label manager", icon: Tag }] : []),
+    ...(hasLabelSubscription(user) ? [{ href: "/dashboard/label", label: "Label manager", icon: Tag }] : []),
     ...(["staff", "moderator", "admin"].includes(user?.role) ? [{ href: "/staff-dashboard", label: "Panel " + (user?.role || "staff"), icon: ShieldCheck }] : [])
   ];
   return (

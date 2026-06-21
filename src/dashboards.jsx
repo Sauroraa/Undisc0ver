@@ -1871,7 +1871,8 @@ export function LabelDashboard({ notify }) {
   const { data, loading, error } = window.__undiscover_use_data(`/dashboards/label`, [user?.id, refreshKey]);
 
   if (!user) return <div className="db-auth-required"><Lock size={32} /><p>Connexion requise.</p></div>;
-  if (!["label", "admin"].includes(user.role)) return <div className="db-auth-required"><ShieldAlert size={32} /><p>Accès Label requis.</p></div>;
+  const hasAccess = String(user.plan || "").toLowerCase() === "label" || ["label", "admin"].includes(user.role);
+  if (!hasAccess) return <div className="db-auth-required"><ShieldAlert size={32} /><p>Accès Label requis.</p></div>;
 
   const refresh = () => setRefreshKey(k => k + 1);
 
