@@ -70,6 +70,10 @@ import {
   Wifi as WifiIcon,
   X,
   Zap,
+  Radio,
+  Star,
+  RotateCcw,
+  Sprout,
   Infinity as InfinityIcon
 } from "lucide-react";
 import { AnimatePresence, motion, useScroll, useTransform } from "framer-motion";
@@ -2964,6 +2968,15 @@ function CrateDropSection({ notify, playRelease }) {
   );
 }
 
+// /dashboard → dashboard artiste (label voit LabelDashboard, sinon ancien Dashboard)
+function SmartArtistDashboard({ notify, playRelease }) {
+  const { user, loading } = useAuth();
+  if (loading) return <main className="page"><div className="db-loading"><Loader2 className="spin" size={28} /></div></main>;
+  if (!user) return <AuthPage mode="login" notify={notify} />;
+  if (user.role === "label") return <LabelDashboard notify={notify} />;
+  return <Dashboard notify={notify} playRelease={playRelease} section="overview" />;
+}
+
 // /staff-dashboard → panel opérationnel (staff, mod, admin uniquement)
 function SmartStaffPanel({ notify }) {
   const { user, loading } = useAuth();
@@ -3004,7 +3017,7 @@ function renderRoute(route, notify, playRelease) {
   if (path === "/careers") return <CareersPage />;
   if (path === "/staff") return <SmartStaffPanel notify={notify} />;
   if (path === "/staff-dashboard") return <SmartStaffPanel notify={notify} />;
-  if (path === "/dashboard") return <Dashboard notify={notify} playRelease={playRelease} section="overview" />;
+  if (path === "/dashboard") return <SmartArtistDashboard notify={notify} playRelease={playRelease} />;
   if (path === "/dashboard/label") return <LabelDashboard notify={notify} />;
   if (path === "/dashboard/pro") return <ProDashboard notify={notify} playRelease={playRelease} />;
   if (path === "/mod-dashboard") return <ModeratorDashboard notify={notify} />;
@@ -5951,14 +5964,14 @@ function TestimonialEditor({ user, notify }) {
 }
 
 const CAMPAIGN_TYPES_META = {
-  boost_lite:     { label: "Boost Léger",          desc: "Tester un son avec un petit budget.",                     icon: "🔆", prices: { 1: 299, 3: 599, 7: 899 } },
-  boost_standard: { label: "Boost Standard",        desc: "Visibilité réelle sur les sections clés.",               icon: "⚡", prices: { 3: 999, 7: 1499, 14: 2499 } },
-  boost_premium:  { label: "Boost Premium",         desc: "Placement fort sur toutes les sections.",                icon: "🔥", prices: { 7: 2499, 14: 3999 } },
-  launch:         { label: "Lancement",             desc: "Badge Nouveau pour une sortie fraîche.",                 icon: "🚀", prices: { 1: 499, 3: 999, 7: 1499 } },
-  profile_boost:  { label: "Profil Sponsorisé",     desc: "Gagner des followers ciblés.",                           icon: "👤", prices: { 7: 799, 14: 1299 } },
-  genre_targeted: { label: "Genre Ciblé",           desc: "Audience qualifiée par genre et comportement.",          icon: "🎯", prices: { 3: 1199, 7: 1999 } },
-  retargeting:    { label: "Retargeting Interne",   desc: "Remontrer ton son aux auditeurs d'artistes similaires.", icon: "🔁", prices: { 7: 999, 14: 1699 } },
-  new_talent:     { label: "Nouveau Talent",        desc: "Programme spécial pour artistes émergents (≤500 followers).", icon: "🌱", prices: { 7: 0, 14: 199 } },
+  boost_lite:     { label: "Boost Léger",          desc: "Tester un son avec un petit budget.",                     icon: TrendingUp,  prices: { 1: 299, 3: 599, 7: 899 } },
+  boost_standard: { label: "Boost Standard",        desc: "Visibilité réelle sur les sections clés.",               icon: Zap,         prices: { 3: 999, 7: 1499, 14: 2499 } },
+  boost_premium:  { label: "Boost Premium",         desc: "Placement fort sur toutes les sections.",                icon: Star,        prices: { 7: 2499, 14: 3999 } },
+  launch:         { label: "Lancement",             desc: "Badge Nouveau pour une sortie fraîche.",                 icon: Radio,       prices: { 1: 499, 3: 999, 7: 1499 } },
+  profile_boost:  { label: "Profil Sponsorisé",     desc: "Gagner des followers ciblés.",                           icon: UserPlus,    prices: { 7: 799, 14: 1299 } },
+  genre_targeted: { label: "Genre Ciblé",           desc: "Audience qualifiée par genre et comportement.",          icon: Target,      prices: { 3: 1199, 7: 1999 } },
+  retargeting:    { label: "Retargeting Interne",   desc: "Remontrer ton son aux auditeurs d'artistes similaires.", icon: RotateCcw,   prices: { 7: 999, 14: 1699 } },
+  new_talent:     { label: "Nouveau Talent",        desc: "Programme spécial pour artistes émergents (≤500 followers).", icon: Sprout, prices: { 7: 0, 14: 199 } },
 };
 
 const OBJECTIVES_META = {
@@ -6042,7 +6055,7 @@ function CampaignCreateWizard({ releases, notify, onDone }) {
           <div className="campaign-type-grid">
             {Object.entries(CAMPAIGN_TYPES_META).map(([key, m]) => (
               <button key={key} type="button" className={`campaign-type-card ${form.campaign_type === key ? "selected" : ""}`} onClick={() => { update("campaign_type", key); const firstDay = Object.keys(m.prices || { 7: 0 }).map(Number).sort((a, b) => a - b)[0]; update("days", firstDay); }}>
-                <span className="ct-icon">{m.icon}</span>
+                <span className="ct-icon">{m.icon && <m.icon size={18} />}</span>
                 <strong>{m.label}</strong>
                 <small>{m.desc}</small>
                 <em>{m.prices ? `à partir de ${money(Math.min(...Object.values(m.prices)))}` : ""}</em>
@@ -6117,7 +6130,7 @@ function CampaignCreateWizard({ releases, notify, onDone }) {
           <div className="campaign-summary-card">
             {selectedRelease && <ReleaseThumbnail release={selectedRelease} size={64} />}
             <div className="cs-details">
-              <div className="cs-row"><span>Type</span><strong>{meta.icon} {meta.label}</strong></div>
+              <div className="cs-row"><span>Type</span><strong>{meta.icon && <meta.icon size={13} style={{ verticalAlign: "middle", marginRight: 4 }} />}{meta.label}</strong></div>
               <div className="cs-row"><span>Release</span><strong>{selectedRelease?.title || "—"}</strong></div>
               <div className="cs-row"><span>Durée</span><strong>{form.days} jour{form.days > 1 ? "s" : ""}</strong></div>
               <div className="cs-row"><span>Objectif</span><strong>{OBJECTIVES_META[form.objective] || form.objective}</strong></div>
@@ -6143,7 +6156,7 @@ function CampaignRow({ campaign, onAction, actionBusy }) {
       <ReleaseThumbnail release={{ cover_url: campaign.image_url || campaign.release_cover_url, title: campaign.release_title }} size={54} />
       <div className="campaign-row-main">
         <div><strong>{campaign.title}</strong><CampaignStatusBadge status={campaign.status} /></div>
-        <small>{meta.icon} {meta.label || campaign.campaign_type} · {campaign.days}j · {campaign.release_title || "Profil"}</small>
+        <small>{meta.icon && <meta.icon size={12} />} {meta.label || campaign.campaign_type} · {campaign.days}j · {campaign.release_title || "Profil"}</small>
         {campaign.rejection_reason && <p className="campaign-rejection">Refusé : {campaign.rejection_reason}</p>}
       </div>
       <div className="campaign-row-metrics">

@@ -463,12 +463,26 @@ dashboardsRouter.get("/admin", authMiddleware, (req, res) => {
   // Role distribution
   const roleDistribution = db.prepare("SELECT role, COUNT(*) count FROM users GROUP BY role ORDER BY count DESC").all();
 
+  const tickets = db.prepare(`
+    SELECT st.*, u.name user_name, u.email user_email, u.avatar_url user_avatar
+    FROM support_tickets st LEFT JOIN users u ON u.id = st.user_id
+    ORDER BY CASE st.status WHEN 'open' THEN 0 WHEN 'pending' THEN 1 ELSE 2 END, st.created_at DESC LIMIT 300
+  `).all();
+
+  const ticketMessages = db.prepare(`
+    SELECT tm.*, u.name sender_name FROM ticket_messages tm
+    LEFT JOIN users u ON u.id = tm.sender_id
+    ORDER BY tm.created_at ASC
+  `).all();
+
   res.json({
     overview,
     users,
     releases,
     campaigns,
     payouts,
+    tickets,
+    ticket_messages: ticketMessages,
     security_logs: securityLogs,
     audit_log: auditLog,
     reports,
@@ -582,6 +596,14 @@ dashboardsRouter.post("/staff/releases/:id/reject", authMiddleware, (req, res) =
   const reason = String(req.body.reason || "").trim();
   db.prepare("UPDATE releases SET moderation_status = 'blocked' WHERE id = ?").run(req.params.id);
   db.prepare("INSERT INTO audit_logs (id, actor_id, action, entity_type, entity_id, details) VALUES (?, ?, 'release.block', 'release', ?, ?)").run(`log_${Date.now()}`, req.user.id, req.params.id, reason);
+  res.json({ ok: true });
+});
+
+// Delete ticket (admin only)
+dashboardsRouter.delete("/admin/tickets/:id", authMiddleware, (req, res) => {
+  if (!requireRole(req, res, ["admin"])) return;
+  db.prepare("DELETE FROM ticket_messages WHERE ticket_id = ?").run(req.params.id);
+  db.prepare("DELETE FROM support_tickets WHERE id = ?").run(req.params.id);
   res.json({ ok: true });
 });
 

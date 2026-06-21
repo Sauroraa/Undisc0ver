@@ -11,7 +11,7 @@ import {
   TrendingUp, TrendingDown, Activity, Clock, Globe, Lock, MessageCircle,
   Music2, Star, Award, Layers, BarChart2, PieChart as PieChartIcon,
   ArrowUpRight, ArrowDownRight, Info, Flag, Ban, CheckSquare, XSquare,
-  DollarSign, Mail, Headphones, Hash
+  DollarSign, Mail, Headphones, Hash, Send, Inbox
 } from "lucide-react";
 
 // ── Shared helpers (expect these globals from main.jsx context) ───────────────
@@ -1371,15 +1371,16 @@ export function AdminDashboard({ notify }) {
 
   const refresh = () => setRefreshKey(k => k + 1);
   const items = [
-    ["overview", "Vue d'ensemble", HomeIcon],
-    ["users", "Utilisateurs", Users],
-    ["releases", "Tracks & Dubpacks", Music2],
-    ["campaigns", "Campagnes", Zap],
-    ["payments", "Paiements", Wallet],
-    ["reports", "Modération", Flag],
-    ["security", "Sécurité", ShieldAlert],
-    ["logs", "Logs admin", FileText],
-    ["settings", "Paramètres", Settings],
+    ["overview",  "Vue d'ensemble",    HomeIcon],
+    ["users",     "Utilisateurs",      Users],
+    ["releases",  "Tracks & Dubpacks", Music2],
+    ["campaigns", "Campagnes",         Zap],
+    ["tickets",   "Support",           MessageCircle],
+    ["payments",  "Paiements",         Wallet],
+    ["reports",   "Modération",        Flag],
+    ["security",  "Sécurité",          ShieldAlert],
+    ["logs",      "Logs admin",        FileText],
+    ["settings",  "Paramètres",        Settings],
   ];
 
   return (
@@ -1395,6 +1396,7 @@ export function AdminDashboard({ notify }) {
           {section === "users" && <AdminUsers users={data.users} roleDistribution={data.role_distribution} notify={notify} onRefresh={refresh} />}
           {section === "releases" && <AdminReleases releases={data.releases} notify={notify} onRefresh={refresh} />}
           {section === "campaigns" && <AdminCampaigns campaigns={data.campaigns} notify={notify} onRefresh={refresh} />}
+          {section === "tickets" && <AdminTickets tickets={data.tickets || []} ticketMessages={data.ticket_messages || []} notify={notify} onRefresh={refresh} />}
           {section === "payments" && <AdminPayments payouts={data.payouts} notify={notify} onRefresh={refresh} />}
           {section === "reports" && <ModReports reports={data.reports} notify={notify} onRefresh={refresh} />}
           {section === "security" && <ModSecurityLogs logs={data.security_logs} />}
@@ -1403,6 +1405,139 @@ export function AdminDashboard({ notify }) {
         </>
       )}
     </DashboardShell>
+  );
+}
+
+function AdminTickets({ tickets, ticketMessages, notify, onRefresh }) {
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [selectedId, setSelectedId] = useState(null);
+  const [busy, setBusy] = useState("");
+  const [replyText, setReplyText] = useState("");
+  const [replyBusy, setReplyBusy] = useState(false);
+
+  const filtered = tickets.filter(t => {
+    if (statusFilter !== "all" && t.status !== statusFilter) return false;
+    const q = search.toLowerCase();
+    return !q || (t.topic || "").toLowerCase().includes(q) || (t.name || "").toLowerCase().includes(q) || (t.email || "").toLowerCase().includes(q) || (t.user_name || "").toLowerCase().includes(q);
+  });
+  const selected = selectedId ? tickets.find(t => t.id === selectedId) : null;
+  const messages = ticketMessages.filter(m => m.ticket_id === selectedId);
+
+  const updateStatus = async (id, status) => {
+    setBusy(id + status);
+    try {
+      await window.__undiscover_request(`/dashboards/staff/tickets/${id}`, { method: "PATCH", body: JSON.stringify({ status }) });
+      notify("Ticket mis à jour."); onRefresh();
+    } catch (e) { notify(e.message); } finally { setBusy(""); }
+  };
+
+  const deleteTicket = async (id) => {
+    if (!window.confirm("Supprimer définitivement ce ticket et ses messages ?")) return;
+    setBusy(id + "del");
+    try {
+      await window.__undiscover_request(`/dashboards/admin/tickets/${id}`, { method: "DELETE" });
+      notify("Ticket supprimé."); setSelectedId(null); onRefresh();
+    } catch (e) { notify(e.message); } finally { setBusy(""); }
+  };
+
+  const sendReply = async () => {
+    if (!replyText.trim() || !selectedId) return;
+    setReplyBusy(true);
+    try {
+      await window.__undiscover_request(`/staff/tickets/${selectedId}/reply`, { method: "POST", body: JSON.stringify({ body: replyText }) });
+      setReplyText(""); notify("Réponse envoyée."); onRefresh();
+    } catch (e) { notify(e.message); } finally { setReplyBusy(false); }
+  };
+
+  const openCount = tickets.filter(t => t.status === "open").length;
+  const pendingCount = tickets.filter(t => t.status === "pending").length;
+
+  return (
+    <div className="db-section">
+      <div className="db-section-header">
+        <div><h2>Tickets support</h2><p>{tickets.length} ticket(s) · {openCount} ouverts · {pendingCount} en attente</p></div>
+      </div>
+      <div className="admin-tickets-layout">
+        <div className="atl-list">
+          <div className="atl-list-head">
+            <FilterBar value={search} onChange={setSearch} placeholder="Rechercher..." />
+          </div>
+          <div className="atl-filters">
+            {["all","open","pending","resolved","closed"].map(s => (
+              <button key={s} type="button" className={`filter-chip ${statusFilter === s ? "active" : ""}`} onClick={() => setStatusFilter(s)}>
+                {s === "all" ? "Tous" : s}
+              </button>
+            ))}
+          </div>
+          <div className="atl-items">
+            {!filtered.length
+              ? <div style={{ padding: "24px 14px", color: "rgba(255,255,255,.25)", fontSize: 13, textAlign: "center" }}>Aucun ticket</div>
+              : filtered.map(t => (
+                <button key={t.id} type="button" className={`atl-item ${selectedId === t.id ? "active" : ""}`} onClick={() => setSelectedId(t.id)}>
+                  <div className="atl-item-top">
+                    <span className="atl-topic">{t.topic}</span>
+                    <StatusBadge status={t.status} />
+                  </div>
+                  <div className="atl-item-from">{t.user_name || t.name} · {t.email}</div>
+                  <div className="atl-item-date">{timeAgo(t.created_at)}</div>
+                </button>
+              ))
+            }
+          </div>
+        </div>
+
+        {selected ? (
+          <div className="atl-thread">
+            <div className="atl-thread-head">
+              <div>
+                <strong>{selected.topic}</strong>
+                <span>{selected.user_name || selected.name} · {selected.email}</span>
+              </div>
+              <div className="atl-thread-actions">
+                {selected.status !== "resolved" && (
+                  <button className="button ghost mini" type="button" disabled={!!busy} onClick={() => updateStatus(selected.id, "resolved")}>
+                    <CheckSquare size={12} /> Résoudre
+                  </button>
+                )}
+                {selected.status !== "closed" && (
+                  <button className="button ghost mini" type="button" disabled={!!busy} onClick={() => updateStatus(selected.id, "closed")}>
+                    <X size={12} /> Fermer
+                  </button>
+                )}
+                <button className="button ghost mini danger" type="button" disabled={busy === selected.id + "del"} onClick={() => deleteTicket(selected.id)}>
+                  <Trash size={12} />
+                </button>
+              </div>
+            </div>
+            <div className="atl-messages">
+              {messages.map(m => (
+                <div key={m.id} className={`atl-msg atl-msg-${m.sender_type}`}>
+                  <div className="atl-msg-meta">
+                    <strong>{m.sender_type === "staff" ? (m.sender_name || "Staff") : m.sender_type === "system" ? "Système" : (selected.user_name || selected.name)}</strong>
+                    <span>{new Date(m.created_at).toLocaleString("fr-BE", { dateStyle: "short", timeStyle: "short" })}</span>
+                  </div>
+                  <p>{m.body}</p>
+                </div>
+              ))}
+              {!messages.length && <div style={{ color: "rgba(255,255,255,.25)", fontSize: 13, textAlign: "center", padding: "24px 0" }}>Aucun message</div>}
+            </div>
+            <div className="atl-reply">
+              <textarea className="atl-reply-input" value={replyText} onChange={e => setReplyText(e.target.value)} placeholder="Écrire une réponse..." rows={3}
+                onKeyDown={e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) sendReply(); }} />
+              <button className="button accent" type="button" onClick={sendReply} disabled={replyBusy || !replyText.trim()}>
+                {replyBusy ? <Loader2 className="spin" size={14} /> : <Send size={14} />} Envoyer
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="atl-empty-thread">
+            <Inbox size={28} />
+            <span>Sélectionne un ticket pour voir la conversation</span>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
