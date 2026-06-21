@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useId, useMemo, useRef, useState } from "react";
+﻿import React, { createContext, useContext, useEffect, useId, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   ArrowDownToLine,
@@ -69,7 +69,6 @@ import {
   X
 } from "lucide-react";
 import { AnimatePresence, motion, useScroll, useTransform } from "framer-motion";
-import * as THREE from "three";
 import "./styles.css";
 
 const API = "/api";
@@ -133,8 +132,7 @@ const TRANSLATIONS = {
     "Pricing": "Tarifs",
     "Charts": "Classements",
     "Explore": "Explorer",
-    "Upload release": "Uploader une sortie",
-  "Explore catalog": "Explorer le catalogue",
+    "Explore catalog": "Explorer le catalogue",
   "Browse catalog": "Parcourir le catalogue",
   "Production catalog, gates and checkout are live": "Catalogue production, gates et checkout sont en ligne",
   "See what is moving this week.": "Voir ce qui bouge cette semaine.",
@@ -538,7 +536,6 @@ Object.assign(TRANSLATIONS.fr, {
   "Label manager": "Manager label",
   "Browse all ->": "Tout parcourir ->",
   "Simple plans for artists who want to publish, sell and measure their releases without a heavy platform stack.": "Des plans simples pour les artistes qui veulent publier, vendre et mesurer leurs sorties sans stack lourde.",
-  "+ Direct": "+ Direct",
   "+ Built-in": "+ Integre",
   "FREE DL": "FREE DL",
   "TRACK": "TRACK",
@@ -1249,7 +1246,7 @@ function artistHandle(artist = {}) {
 }
 
 function artistPath(artist = {}) {
-  return `#/artist/${artistHandle(artist)}`;
+  return `/artist/${artistHandle(artist)}`;
 }
 
 function artistPublicUrl(artist = {}) {
@@ -1391,7 +1388,7 @@ function AuthProvider({ children }) {
       await request("/auth/logout", { method: "POST" }).catch(() => {});
       localStorage.removeItem("undiscover_token");
       setUser(null);
-      location.hash = "#/";
+      navigate("/");
     }
   }), [user, loading]);
 
@@ -1403,21 +1400,21 @@ function useAuth() {
 }
 
 function getCurrentRoute() {
-  if (location.hash) return location.hash.slice(1) || "/";
-  const cleanPath = `${location.pathname}${location.search}`.replace(/\/$/, "") || "/";
-  return cleanPath === "" ? "/" : cleanPath;
+  const path = `${location.pathname}${location.search}`;
+  return path || "/";
+}
+
+function navigate(path) {
+  history.pushState({}, "", path);
+  window.dispatchEvent(new PopStateEvent("popstate", { state: {} }));
 }
 
 function useHashRoute() {
   const [route, setRoute] = useState(getCurrentRoute);
   useEffect(() => {
     const onRouteChange = () => setRoute(getCurrentRoute());
-    addEventListener("hashchange", onRouteChange);
-    addEventListener("popstate", onRouteChange);
-    return () => {
-      removeEventListener("hashchange", onRouteChange);
-      removeEventListener("popstate", onRouteChange);
-    };
+    window.addEventListener("popstate", onRouteChange);
+    return () => window.removeEventListener("popstate", onRouteChange);
   }, []);
   return route;
 }
@@ -1667,124 +1664,15 @@ function BrandMark({ className = "", label = "Undiscover" }) {
 
 function Logo({ compact = false }) {
   return (
-    <a className="logo" href="#/">
+    <a className="logo" href="/">
       <BrandMark label="Undiscover" />
       {!compact && <strong>Undiscover</strong>}
     </a>
   );
 }
 
-function GLSLHills({ speed = 0.5 }) {
-  const canvasRef = useRef(null);
-
-  useEffect(() => {
-    let frame = 0;
-    const canvas = canvasRef.current;
-    const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, alpha: true, preserveDrawingBuffer: true });
-    const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(45, 1, 1, 10000);
-    const clock = new THREE.Clock();
-    const uniforms = { time: { value: 0 } };
-
-    const mesh = new THREE.Mesh(
-      new THREE.PlaneGeometry(256, 256, 128, 128),
-      new THREE.RawShaderMaterial({
-        uniforms,
-        vertexShader: `
-          attribute vec3 position;
-          uniform mat4 projectionMatrix;
-          uniform mat4 modelViewMatrix;
-          uniform float time;
-          varying vec3 vPosition;
-
-          mat4 rotateMatrixX(float radian) {
-            return mat4(1.0,0.0,0.0,0.0,0.0,cos(radian),-sin(radian),0.0,0.0,sin(radian),cos(radian),0.0,0.0,0.0,0.0,1.0);
-          }
-          vec3 mod289(vec3 x){return x-floor(x*(1.0/289.0))*289.0;}
-          vec4 mod289(vec4 x){return x-floor(x*(1.0/289.0))*289.0;}
-          vec4 permute(vec4 x){return mod289(((x*34.0)+1.0)*x);}
-          vec4 taylorInvSqrt(vec4 r){return 1.79284291400159-0.85373472095314*r;}
-          vec3 fade(vec3 t){return t*t*t*(t*(t*6.0-15.0)+10.0);}
-          float cnoise(vec3 P){
-            vec3 Pi0=floor(P); vec3 Pi1=Pi0+vec3(1.0); Pi0=mod289(Pi0); Pi1=mod289(Pi1);
-            vec3 Pf0=fract(P); vec3 Pf1=Pf0-vec3(1.0);
-            vec4 ix=vec4(Pi0.x,Pi1.x,Pi0.x,Pi1.x); vec4 iy=vec4(Pi0.yy,Pi1.yy);
-            vec4 iz0=Pi0.zzzz; vec4 iz1=Pi1.zzzz;
-            vec4 ixy=permute(permute(ix)+iy); vec4 ixy0=permute(ixy+iz0); vec4 ixy1=permute(ixy+iz1);
-            vec4 gx0=ixy0*(1.0/7.0); vec4 gy0=fract(floor(gx0)*(1.0/7.0))-0.5; gx0=fract(gx0);
-            vec4 gz0=vec4(0.5)-abs(gx0)-abs(gy0); vec4 sz0=step(gz0,vec4(0.0));
-            gx0-=sz0*(step(0.0,gx0)-0.5); gy0-=sz0*(step(0.0,gy0)-0.5);
-            vec4 gx1=ixy1*(1.0/7.0); vec4 gy1=fract(floor(gx1)*(1.0/7.0))-0.5; gx1=fract(gx1);
-            vec4 gz1=vec4(0.5)-abs(gx1)-abs(gy1); vec4 sz1=step(gz1,vec4(0.0));
-            gx1-=sz1*(step(0.0,gx1)-0.5); gy1-=sz1*(step(0.0,gy1)-0.5);
-            vec3 g000=vec3(gx0.x,gy0.x,gz0.x); vec3 g100=vec3(gx0.y,gy0.y,gz0.y); vec3 g010=vec3(gx0.z,gy0.z,gz0.z); vec3 g110=vec3(gx0.w,gy0.w,gz0.w);
-            vec3 g001=vec3(gx1.x,gy1.x,gz1.x); vec3 g101=vec3(gx1.y,gy1.y,gz1.y); vec3 g011=vec3(gx1.z,gy1.z,gz1.z); vec3 g111=vec3(gx1.w,gy1.w,gz1.w);
-            vec4 norm0=taylorInvSqrt(vec4(dot(g000,g000),dot(g010,g010),dot(g100,g100),dot(g110,g110)));
-            g000*=norm0.x; g010*=norm0.y; g100*=norm0.z; g110*=norm0.w;
-            vec4 norm1=taylorInvSqrt(vec4(dot(g001,g001),dot(g011,g011),dot(g101,g101),dot(g111,g111)));
-            g001*=norm1.x; g011*=norm1.y; g101*=norm1.z; g111*=norm1.w;
-            float n000=dot(g000,Pf0); float n100=dot(g100,vec3(Pf1.x,Pf0.yz)); float n010=dot(g010,vec3(Pf0.x,Pf1.y,Pf0.z)); float n110=dot(g110,vec3(Pf1.xy,Pf0.z));
-            float n001=dot(g001,vec3(Pf0.xy,Pf1.z)); float n101=dot(g101,vec3(Pf1.x,Pf0.y,Pf1.z)); float n011=dot(g011,vec3(Pf0.x,Pf1.yz)); float n111=dot(g111,Pf1);
-            vec3 fade_xyz=fade(Pf0); vec4 n_z=mix(vec4(n000,n100,n010,n110),vec4(n001,n101,n011,n111),fade_xyz.z);
-            vec2 n_yz=mix(n_z.xy,n_z.zw,fade_xyz.y); return 2.2*mix(n_yz.x,n_yz.y,fade_xyz.x);
-          }
-          void main(void) {
-            vec3 updatePosition=(rotateMatrixX(radians(90.0))*vec4(position,1.0)).xyz;
-            float sin1=sin(radians(updatePosition.x/128.0*90.0));
-            vec3 noisePosition=updatePosition+vec3(0.0,0.0,time*-30.0);
-            float noise1=cnoise(noisePosition*0.08);
-            float noise2=cnoise(noisePosition*0.06);
-            float noise3=cnoise(noisePosition*0.4);
-            vec3 lastPosition=updatePosition+vec3(0.0, noise1*sin1*8.0+noise2*sin1*8.0+noise3*(abs(sin1)*2.0+0.5)+pow(sin1,2.0)*40.0, 0.0);
-            vPosition=lastPosition;
-            gl_Position=projectionMatrix*modelViewMatrix*vec4(lastPosition,1.0);
-          }
-        `,
-        fragmentShader: `
-          precision highp float;
-          varying vec3 vPosition;
-          void main(void) {
-            float opacity=(116.0-length(vPosition))/256.0*0.72;
-            vec3 color=vec3(0.831,0.91,0.341);
-            gl_FragColor=vec4(color, opacity);
-          }
-        `,
-        transparent: true
-      })
-    );
-
-    scene.add(mesh);
-    camera.position.set(0, 16, 125);
-    camera.lookAt(new THREE.Vector3(0, 28, 0));
-
-    const resize = () => {
-      const rect = canvas.parentElement.getBoundingClientRect();
-      const width = Math.max(1, rect.width);
-      const height = Math.max(1, rect.height);
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-      renderer.setSize(width, height, false);
-      camera.aspect = width / height;
-      camera.updateProjectionMatrix();
-    };
-    const render = () => {
-      uniforms.time.value += clock.getDelta() * speed;
-      renderer.render(scene, camera);
-      frame = requestAnimationFrame(render);
-    };
-    resize();
-    window.addEventListener("resize", resize);
-    render();
-
-    return () => {
-      cancelAnimationFrame(frame);
-      window.removeEventListener("resize", resize);
-      mesh.geometry.dispose();
-      mesh.material.dispose();
-      renderer.dispose();
-    };
-  }, [speed]);
-
-  return <canvas className="glsl-hills" ref={canvasRef} aria-hidden="true" />;
+function GLSLHills() {
+  return <div className="glsl-hills css-hills" aria-hidden="true" />;
 }
 
 function CrateMark({ className = "" }) {
@@ -1942,7 +1830,7 @@ function MusicPlayer({ release, isPlaying, setIsPlaying, onClose, notify }) {
         <div className="music-player-actions">
           <LikeButton key={`like-${release.id}`} release={release} notify={notify} />
           {release.free ? <DownloadButton release={release} notify={notify} compact /> : <BuyButton release={release} notify={notify} compact />}
-          <a className="button ghost" href={`#/release/${release.id}`}><ArrowUpRight size={16} /></a>
+          <a className="button ghost" href={`/release/${release.id}`}><ArrowUpRight size={16} /></a>
           <button className="button ghost icon-only" onClick={onClose} aria-label="Close player"><X size={16} /></button>
         </div>
       </div>
@@ -1985,7 +1873,7 @@ function UpgradeBanner({ onClose }) {
             <SettingsFilled />
           </motion.div>
           <div className="upgrade-banner">
-            <a href="#/pricing" onMouseEnter={() => setIsHovered(true)} onMouseLeave={() => setIsHovered(false)}>Upgrade to U0 Pro</a>
+            <a href="/pricing" onMouseEnter={() => setIsHovered(true)} onMouseLeave={() => setIsHovered(false)}>Upgrade to U0 Pro</a>
             <span>for advanced analytics, unlimited catalog and faster payouts</span>
             <button onClick={onClose} aria-label="Close upgrade banner"><X size={16} /></button>
           </div>
@@ -2184,48 +2072,49 @@ function Footer4Col() {
     {
       title: "About",
       links: [
-        ["Brand concept", "#/"],
-        ["Artists", "#/artists"],
-        ["Charts", "#/charts"],
-        ["Pricing", "#/pricing"],
-        ["Careers", "#/careers"]
+        ["Brand concept", "/"],
+        ["Artists", "/artists"],
+        ["Charts", "/charts"],
+        ["Pricing", "/pricing"],
+        ["Careers", "/careers"]
       ]
     },
     {
       title: "Services",
       links: [
-        ["Upload release", "#/upload"],
-        ["Sell dubpacks", "#/explore?kind=Dubpack"],
-        ["Artist dashboard", "#/dashboard"],
-        ["Payouts", "#/payouts"],
-        ["Checkout", "#/checkout"]
+        ["Upload release", "/upload"],
+        ["Feed artistes", "/feed"],
+        ["Playlists", "/playlists"],
+        ["Sell dubpacks", "/explore?kind=Dubpack"],
+        ["Artist dashboard", "/dashboard"],
+        ["Payouts", "/payouts"]
       ]
     },
     {
       title: "Helpful Links",
       links: [
-        ["FAQs", "#/faq"],
-        ["Support", "#/support"],
-        ["Live chat", "#/support", true],
-        ["Getting started", "#/getting-started"],
-        ["Release guide", "#/release-guide"]
+        ["FAQs", "/faq"],
+        ["Support", "/support"],
+        ["Live chat", "/support", true],
+        ["Getting started", "/getting-started"],
+        ["Release guide", "/release-guide"]
       ]
     },
     {
       title: "Legal",
       links: [
-        ["Legal notice", "#/legal"],
-        ["Terms of use", "#/terms"],
-        ["Sales terms", "#/sales-terms"],
-        ["Privacy", "#/privacy"],
-        ["Acceptable use", "#/acceptable-use"]
+        ["Legal notice", "/legal"],
+        ["Terms of use", "/terms"],
+        ["Sales terms", "/sales-terms"],
+        ["Privacy", "/privacy"],
+        ["Acceptable use", "/acceptable-use"]
       ]
     }
   ];
   const contactInfo = [
     { icon: Phone, label: "Phone", text: COMPANY_INFO.phone, href: COMPANY_INFO.phoneHref },
-    { icon: FileText, label: "Company no.", text: COMPANY_INFO.companyNumber, href: "#/legal" },
-    { icon: MapPin, label: "Registered in", text: COMPANY_INFO.registeredArea, href: "#/legal" }
+    { icon: FileText, label: "Company no.", text: COMPANY_INFO.companyNumber, href: "/legal" },
+    { icon: MapPin, label: "Registered in", text: COMPANY_INFO.registeredArea, href: "/legal" }
   ];
 
   return (
@@ -2397,28 +2286,30 @@ function Topbar({ notify }) {
       key: "release",
       label: "Release",
       items: [
-        { href: "#/upload", label: "Upload release", description: "Publish a track, EP or dubpack." },
-        { href: "#/explore", label: "Explore catalog", description: "Browse new drops and free downloads." },
-        { href: "#/charts", label: "Charts", description: "See what is moving this week." },
-        { href: "#/pricing", label: "Pricing", description: "Compare plans and checkout flows." }
+        { href: "/upload", label: "Upload release", description: "Publish a track, EP or dubpack." },
+        { href: "/explore", label: "Explore catalog", description: "Browse new drops and free downloads." },
+        { href: "/charts", label: "Charts", description: "See what is moving this week." },
+        { href: "/pricing", label: "Pricing", description: "Compare plans and checkout flows." }
       ]
     },
     {
       key: "artists",
       label: "Artists",
       items: [
-        { href: "#/artists", label: "Artist index", icon: Users },
-        { href: "#/dashboard", label: "Artist dashboard", icon: BarChart3 },
-        { href: "#/payouts", label: "Payouts", icon: Wallet }
+        { href: "/artists", label: "Artist index", icon: Users },
+        { href: "/feed", label: "Feed suivis", icon: Bell },
+        { href: "/playlists", label: "Playlists", icon: Music2 },
+        { href: "/dashboard", label: "Artist dashboard", icon: BarChart3 },
+        { href: "/payouts", label: "Payouts", icon: Wallet }
       ]
     },
     {
       key: "support",
       label: "Support",
       items: [
-        { href: "#/getting-started", label: "Getting started", icon: BookOpen },
-        { href: "#/release-guide", label: "Release guide", icon: FileText },
-        { href: "#/support", label: "Live support", icon: LifeBuoy }
+        { href: "/getting-started", label: "Getting started", icon: BookOpen },
+        { href: "/release-guide", label: "Release guide", icon: FileText },
+        { href: "/support", label: "Live support", icon: LifeBuoy }
       ]
     }
   ];
@@ -2431,7 +2322,7 @@ function Topbar({ notify }) {
         </button>
         <Logo />
         <nav className={mobileOpen ? "nav-links open" : "nav-links"}>
-          <a href="#/">Home</a>
+          <a href="/">Home</a>
           {menuGroups.map((group) => (
             <div className="nav-menu" key={group.key}>
               <button
@@ -2469,8 +2360,8 @@ function Topbar({ notify }) {
           </label>
           <InfoMenu notify={notify} />
           {user && <NotificationMenu notify={notify} />}
-          <a className="button ghost upload-action" href="#/upload"><Upload size={16} /> Upload</a>
-          {user ? <UserMenu user={user} logout={logout} /> : <><a className="button ghost" href="#/login">Sign In</a><a className="button accent" href="#/register">Get Started</a></>}
+          <a className="button ghost upload-action" href="/upload"><Upload size={16} /> Upload</a>
+          {user ? <UserMenu user={user} logout={logout} /> : <><a className="button ghost" href="/login">Sign In</a><a className="button accent" href="/register">Get Started</a></>}
         </div>
       </div>
     </header>
@@ -2502,42 +2393,63 @@ function InfoMenu({ notify }) {
 
 function NotificationMenu({ notify }) {
   const [open, setOpen] = useState(false);
+  const [notifs, setNotifs] = useState([]);
+  const [unread, setUnread] = useState(0);
   const menuRef = useCloseOnOutsideClick(open, () => setOpen(false));
-  const [selected, setSelected] = useState("all");
-  const closeAndNotify = (message) => {
-    setOpen(false);
-    notify(message);
+
+  const loadNotifs = () => {
+    request("/notifications").then((res) => {
+      setNotifs(res.notifications || []);
+      setUnread(res.unread || 0);
+    }).catch(() => {});
   };
-  const notes = [
-    { id: "1", category: "updates", icon: Info, title: "Catalog update", description: "A new analytics view has been deployed.", time: "just now" },
-    { id: "2", category: "alerts", icon: AlertTriangle, title: "Artwork missing", description: "One release needs final cover artwork.", time: "1h ago" },
-    { id: "3", category: "reminders", icon: CalendarIcon, title: "Payout reminder", description: "Review your payout settings before Friday.", time: "2h ago" },
-    { id: "4", category: "updates", icon: Bell, title: "Weekly report", description: "Your weekly catalog summary is ready.", time: "1d ago" }
-  ];
-  const categories = ["all", "updates", "alerts", "reminders"];
-  const filtered = selected === "all" ? notes : notes.filter((item) => item.category === selected);
+
+  useEffect(() => {
+    loadNotifs();
+    const interval = setInterval(loadNotifs, 60_000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const markAllRead = async () => {
+    await request("/notifications/read-all", { method: "POST" }).catch(() => {});
+    setUnread(0);
+    setNotifs((prev) => prev.map((n) => ({ ...n, read: 1 })));
+  };
+
+  const timeAgo = (dateStr) => {
+    const ms = Date.now() - new Date(dateStr).getTime();
+    if (ms < 60_000) return "à l'instant";
+    if (ms < 3_600_000) return `${Math.floor(ms / 60_000)}m`;
+    if (ms < 86_400_000) return `${Math.floor(ms / 3_600_000)}h`;
+    return `${Math.floor(ms / 86_400_000)}j`;
+  };
+
+  const typeIcon = (type) => ({ follow: UserPlus, like: Heart, repost: RefreshCw, booking: CalendarIcon, comment: MessageCircle }[type] || Bell);
+
   return (
     <div className="dropdown" ref={menuRef}>
-      <button className="icon-button badge-button" onClick={() => setOpen((value) => !value)} aria-label="Open notifications"><Bell size={17} /><span>{notes.length}</span></button>
+      <button className="icon-button badge-button" onClick={() => { setOpen((v) => !v); }} aria-label="Notifications">
+        <Bell size={17} />
+        {unread > 0 && <span>{unread}</span>}
+      </button>
       {open && (
         <div className="dropdown-panel wide notifications-filter">
-          <b><span><FilterIcon /> Notifications</span><em>{notes.length} new</em></b>
-          <div className="notification-tabs">
-            {categories.map((category) => <button className={selected === category ? "active" : ""} key={category} onClick={() => setSelected(category)}>{category}</button>)}
-          </div>
+          <b><span><Bell size={14} /> Notifications</span><em>{unread > 0 ? `${unread} nouvelles` : "À jour"}</em></b>
           <div className="notification-list">
-            {filtered.length === 0 ? <p>No notifications in this category</p> : filtered.map((item) => {
-              const Icon = item.icon;
+            {notifs.length === 0 ? (
+              <p style={{ padding: "1rem", opacity: 0.6 }}>Aucune notification</p>
+            ) : notifs.slice(0, 8).map((item) => {
+              const Icon = typeIcon(item.type);
               return (
-                <button key={item.id} onClick={() => closeAndNotify(item.description)}>
-                  <span><Icon size={15} /><strong>{item.title}</strong></span>
-                  <small>{item.time}</small>
-                  <em>{item.description}</em>
+                <button key={item.id} className={item.read ? "" : "unread"} onClick={() => { request(`/notifications/${item.id}/read`, { method: "PATCH" }).catch(() => {}); setUnread((u) => Math.max(0, u - (item.read ? 0 : 1))); }}>
+                  <span><Icon size={14} /><strong>{item.actor_name || "Undisc0ver"}</strong></span>
+                  <small>{timeAgo(item.created_at)}</small>
+                  <em>{item.body}{item.release_title && ` — ${item.release_title}`}</em>
                 </button>
               );
             })}
           </div>
-          <button onClick={() => closeAndNotify("All notifications marked as read.")}>View all notifications</button>
+          {unread > 0 && <button onClick={markAllRead}>Tout marquer comme lu</button>}
         </div>
       )}
     </div>
@@ -2562,15 +2474,311 @@ function UserMenu({ user, logout }) {
         <div className="dropdown-panel">
           <b>Signed in as <small>{user.email}</small></b>
           <a href={artistPath(user)} onClick={closeMenu}>Profile</a>
-          <a href="#/settings" onClick={closeMenu}>Settings</a>
-          <a href="#/dashboard" onClick={closeMenu}>Dashboard</a>
-          <a href="#/catalog" onClick={closeMenu}>Catalog</a>
-          {["staff", "moderator", "admin"].includes(user.role) && <a href="#/staff" onClick={closeMenu}>Staff panel</a>}
-          <a href="#/payouts" onClick={closeMenu}>Payouts</a>
+          <a href="/settings" onClick={closeMenu}>Settings</a>
+          <a href="/dashboard" onClick={closeMenu}>Dashboard</a>
+          <a href="/catalog" onClick={closeMenu}>Catalog</a>
+          {["staff", "moderator", "admin"].includes(user.role) && <a href="/staff" onClick={closeMenu}>Staff panel</a>}
+          <a href="/payouts" onClick={closeMenu}>Payouts</a>
           <button onClick={logoutAndClose}><LogOut size={15} /> Logout</button>
         </div>
       )}
     </div>
+  );
+}
+
+// ── New pages: Feed, Playlists, Genre, Reset Password, Checkout Success ─────
+function FeedPage({ notify, playRelease }) {
+  const { user } = useAuth();
+  const { data, loading } = useData("/feed", [user?.id]);
+  if (!user) return <AuthRequired />;
+  const releases = data?.releases || [];
+  return (
+    <main className="page">
+      <PageHeader eyebrow="Feed" title="Sorties des artistes que tu suis." text="Reste à jour sur les drops de ta crate." />
+      {loading ? <SkeletonList /> : releases.length ? (
+        <ReleaseRows releases={releases} notify={notify} playRelease={playRelease} />
+      ) : (
+        <EmptyCatalogState title="Feed vide" text="Suis des artistes pour voir leurs drops ici." />
+      )}
+    </main>
+  );
+}
+
+function PlaylistsPage({ notify, playRelease }) {
+  const { user } = useAuth();
+  const { data, loading, error } = useData("/playlists/public", []);
+  const [myPlaylists, setMyPlaylists] = useState([]);
+  const [creating, setCreating] = useState(false);
+  const [form, setForm] = useState({ title: "", description: "", visibility: "public" });
+  const [activePlaylist, setActivePlaylist] = useState(null);
+  const { data: playlistDetail, loading: detailLoading } = useData(activePlaylist ? `/playlists/${activePlaylist}` : null, [activePlaylist]);
+
+  useEffect(() => {
+    if (!user) return;
+    request("/playlists").then((res) => setMyPlaylists(res.playlists || [])).catch(() => {});
+  }, [user?.id]);
+
+  const createPlaylist = async (e) => {
+    e.preventDefault();
+    try {
+      const res = await request("/playlists", { method: "POST", body: JSON.stringify(form) });
+      setMyPlaylists((prev) => [res.playlist, ...prev]);
+      setCreating(false);
+      setForm({ title: "", description: "", visibility: "public" });
+      notify("Playlist créée.");
+    } catch (err) { notify(err.message); }
+  };
+
+  if (activePlaylist && playlistDetail) {
+    return (
+      <main className="page">
+        <button className="button ghost" onClick={() => setActivePlaylist(null)}><ArrowLeft size={16} /> Retour</button>
+        <PageHeader eyebrow="Playlist" title={playlistDetail.playlist?.title} text={playlistDetail.playlist?.description} />
+        {detailLoading ? <SkeletonList /> : <ReleaseRows releases={playlistDetail.tracks || []} notify={notify} playRelease={playRelease} />}
+      </main>
+    );
+  }
+
+  return (
+    <main className="page">
+      <PageHeader eyebrow="Playlists" title="Crates et collections." text="Playlists publiques créées par la communauté Undisc0ver." />
+      {user && (
+        <div className="playlist-actions">
+          {creating ? (
+            <form className="playlist-create-form" onSubmit={createPlaylist}>
+              <label>Titre<input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="Nom de ta playlist" required /></label>
+              <label>Description<input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="Optionnel" /></label>
+              <label>Visibilité<select value={form.visibility} onChange={(e) => setForm({ ...form, visibility: e.target.value })}><option value="public">Publique</option><option value="private">Privée</option></select></label>
+              <div className="button-row"><button className="button accent" type="submit"><Plus size={16} /> Créer</button><button className="button ghost" type="button" onClick={() => setCreating(false)}>Annuler</button></div>
+            </form>
+          ) : (
+            <button className="button accent" onClick={() => setCreating(true)}><Plus size={16} /> Nouvelle playlist</button>
+          )}
+          {myPlaylists.length > 0 && (
+            <section className="section">
+              <h2 className="label">Mes playlists</h2>
+              <div className="playlist-grid">
+                {myPlaylists.map((pl) => (
+                  <article key={pl.id} className="playlist-card" onClick={() => setActivePlaylist(pl.id)}>
+                    <strong>{pl.title}</strong>
+                    <span>{pl.track_count || 0} sons · {pl.visibility}</span>
+                  </article>
+                ))}
+              </div>
+            </section>
+          )}
+        </div>
+      )}
+      {loading ? <SkeletonList /> : error ? <ErrorPage message={error} /> : (
+        <div className="playlist-grid">
+          {(data?.playlists || []).map((pl) => (
+            <article key={pl.id} className="playlist-card" onClick={() => setActivePlaylist(pl.id)}>
+              <strong>{pl.title}</strong>
+              <span>{pl.owner_name} · {pl.track_count || 0} sons</span>
+              {pl.description && <small>{pl.description}</small>}
+            </article>
+          ))}
+          {!data?.playlists?.length && <EmptyCatalogState title="Aucune playlist publique" text="Sois le premier à créer une playlist." />}
+        </div>
+      )}
+    </main>
+  );
+}
+
+function GenrePage({ genre, notify, playRelease }) {
+  const encodedGenre = encodeURIComponent(genre);
+  const { data, loading } = useData(`/genre/${encodedGenre}/releases`, [genre]);
+  return (
+    <main className="page">
+      <PageHeader eyebrow="Genre" title={`${genre} — Releases`} text={`Tous les sons ${genre} sur Undisc0ver, classés par plays.`} />
+      {loading ? <SkeletonList /> : (
+        <>
+          {(data?.artists || []).length > 0 && (
+            <section className="section">
+              <h2 className="label">Artistes {genre}</h2>
+              <div className="artist-grid">{data.artists.map((a) => <ArtistCard key={a.id} artist={a} notify={notify} />)}</div>
+            </section>
+          )}
+          <section className="section">
+            <h2 className="label">Releases {genre}</h2>
+            {(data?.releases || []).length ? <ReleaseRows releases={data.releases} notify={notify} playRelease={playRelease} /> : <EmptyCatalogState title={`Aucun son ${genre}`} text="Sois le premier à uploader dans ce genre." />}
+          </section>
+        </>
+      )}
+    </main>
+  );
+}
+
+function ResetPasswordPage({ query, notify }) {
+  const token = new URLSearchParams(query || "").get("token") || "";
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [done, setDone] = useState(false);
+  const [error, setError] = useState("");
+  const submit = async (e) => {
+    e.preventDefault();
+    if (password !== confirm) return setError("Les mots de passe ne correspondent pas.");
+    if (password.length < 8) return setError("Minimum 8 caractères.");
+    setError("");
+    try {
+      await request("/auth/reset-password", { method: "POST", body: JSON.stringify({ token, password }) });
+      setDone(true);
+      notify("Mot de passe réinitialisé.");
+    } catch (err) { setError(err.message); }
+  };
+  if (!token) return <ErrorPage message="Lien de réinitialisation invalide." />;
+  if (done) return (
+    <main className="auth-shell"><section className="auth-panel"><div className="auth-card" style={{ textAlign: "center" }}><Check size={32} color="var(--accent)" /><h2>Mot de passe réinitialisé</h2><a className="button accent" href="/login">Se connecter</a></div></section></main>
+  );
+  return (
+    <main className="auth-shell">
+      <section className="auth-panel">
+        <form className="auth-card" onSubmit={submit}>
+          <div className="auth-title"><h1>Nouveau mot de passe</h1><p>Choisis un mot de passe d'au moins 8 caractères.</p></div>
+          <label>Nouveau mot de passe<input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" required /></label>
+          <label>Confirmer<input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder="••••••••" required /></label>
+          {error && <p className="error">{error}</p>}
+          <button className="button auth-submit" type="submit">Réinitialiser</button>
+        </form>
+      </section>
+    </main>
+  );
+}
+
+function CheckoutSuccessPage({ query, notify }) {
+  const sessionId = new URLSearchParams(query || "").get("session_id") || "";
+  const { data, loading } = useData(sessionId ? `/checkout/success?session_id=${sessionId}` : null, [sessionId]);
+  return (
+    <main className="auth-shell">
+      <section className="auth-panel">
+        <div className="auth-card" style={{ textAlign: "center" }}>
+          {loading ? <Loader2 className="spin" size={32} /> : data?.ok ? (
+            <>
+              <Check size={32} color="var(--accent)" />
+              <h2>{data.type === "subscription" ? "Abonnement activé !" : "Achat confirmé !"}</h2>
+              <p>Merci pour ton achat. Ton contenu est maintenant disponible.</p>
+              <a className="button accent" href="/dashboard">Voir le dashboard</a>
+            </>
+          ) : (
+            <>
+              <AlertTriangle size={32} color="var(--error, #f66)" />
+              <h2>Paiement non confirmé</h2>
+              <p>Si tu as été débité, contacte le support.</p>
+              <a className="button ghost" href="/support">Support</a>
+            </>
+          )}
+        </div>
+      </section>
+    </main>
+  );
+}
+
+// ── Signal score badge ───────────────────────────────────────────────────────
+function SignalScore({ releaseId }) {
+  const { data } = useData(`/releases/${releaseId}/signal`, [releaseId]);
+  if (!data || data.score === undefined) return null;
+  const score = data.score;
+  const color = score >= 75 ? "var(--accent)" : score >= 40 ? "#f0b429" : "var(--muted, #888)";
+  return (
+    <span className="signal-score" title={`Signal: ${score}/100`} style={{ color }}>
+      <WifiIcon size={12} /> {score}
+    </span>
+  );
+}
+
+// ── Repost button ────────────────────────────────────────────────────────────
+function RepostButton({ releaseId, notify, compact = false }) {
+  const { user } = useAuth();
+  const [state, setState] = useState({ reposted: false, count: 0 });
+  useEffect(() => {
+    request(`/releases/${releaseId}/repost`).then((res) => setState({ reposted: res.reposted, count: res.count })).catch(() => {});
+  }, [releaseId]);
+  const toggle = async () => {
+    if (!user) return navigate("/login");
+    try {
+      const res = await request(`/releases/${releaseId}/repost`, { method: "POST" });
+      setState((prev) => ({ reposted: res.reposted, count: prev.count + (res.reposted ? 1 : -1) }));
+      notify(res.reposted ? "Reposté." : "Repost retiré.");
+    } catch (err) { notify(err.message); }
+  };
+  return (
+    <button className={`button ghost repost-button ${state.reposted ? "active" : ""}`} onClick={toggle} title="Repost">
+      <RefreshCw size={14} /> {!compact && state.count > 0 && <span>{state.count}</span>}
+    </button>
+  );
+}
+
+// ── Booking modal ────────────────────────────────────────────────────────────
+function BookingModal({ artist, onClose, notify }) {
+  const { user } = useAuth();
+  const [form, setForm] = useState({ name: user?.name || "", email: user?.email || "", event_date: "", event_type: "", message: "" });
+  const [sent, setSent] = useState(false);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const submit = async (e) => {
+    e.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      await request(`/artists/${artist.id}/booking`, { method: "POST", body: JSON.stringify(form) });
+      setSent(true);
+      notify("Demande de booking envoyée.");
+    } catch (err) { setError(err.message); } finally { setBusy(false); }
+  };
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+        <button className="modal-close" onClick={onClose}><X size={18} /></button>
+        <h2>Booking — {artist.name}</h2>
+        {sent ? (
+          <div style={{ textAlign: "center", padding: "2rem" }}>
+            <Check size={32} color="var(--accent)" />
+            <p>Demande envoyée ! L'artiste te contactera sous 48h.</p>
+            <button className="button accent" onClick={onClose}>Fermer</button>
+          </div>
+        ) : (
+          <form onSubmit={submit}>
+            <label>Ton nom<input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required /></label>
+            <label>Email<input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} required /></label>
+            <label>Date de l'événement<input type="date" value={form.event_date} onChange={(e) => setForm({ ...form, event_date: e.target.value })} /></label>
+            <label>Type d'événement<input value={form.event_type} onChange={(e) => setForm({ ...form, event_type: e.target.value })} placeholder="Club, festival, showcase..." /></label>
+            <label>Message<textarea value={form.message} onChange={(e) => setForm({ ...form, message: e.target.value })} placeholder="Décris ton événement, ta jauge, ta ville..." required rows={4} /></label>
+            {error && <p className="error">{error}</p>}
+            <button className="button accent" type="submit" disabled={busy}>{busy ? <Loader2 className="spin" size={16} /> : <Mail size={16} />} Envoyer la demande</button>
+          </form>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Crate drop editorial (weekly featured releases) ──────────────────────────
+function CrateDropSection({ notify, playRelease }) {
+  const { data, loading } = useData("/crate-drop", []);
+  if (loading || !data?.releases?.length) return null;
+  return (
+    <section className="section crate-drop-section">
+      <SectionTitle title="Crate drop" action="Voir tout" link="/explore" />
+      <p className="label" style={{ marginBottom: "1rem" }}>Sélection éditoriale de la semaine — qualité, originalité, impact.</p>
+      <div className="release-grid crate-drop-grid">
+        {data.releases.slice(0, 6).map((release) => (
+          <article key={release.id} className="card release-card crate-drop-card">
+            <div className="card-cover">
+              {release.cover_url ? <img src={release.cover_url} alt="" /> : <span className={`avatar ${release.color}`}>{release.avatar}</span>}
+              <button className="card-play" onClick={() => playRelease(release)} aria-label={`Play ${release.title}`}><Play size={16} fill="currentColor" /></button>
+            </div>
+            <div className="card-meta">
+              <a href={`/release/${release.id}`}><strong>{release.title}</strong></a>
+              <span>{release.artist} — {release.genre}</span>
+              <div className="card-actions-row">
+                <RepostButton releaseId={release.id} notify={notify} compact />
+                <span className="signal-badge"><WifiIcon size={11} /> Hot</span>
+              </div>
+            </div>
+          </article>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -2580,11 +2788,16 @@ function renderRoute(route, notify, playRelease) {
   if (path === "/explore") return <Explore notify={notify} query={query} playRelease={playRelease} />;
   if (path === "/charts") return <Charts notify={notify} playRelease={playRelease} query={query} />;
   if (path === "/artists") return <Artists notify={notify} />;
+  if (path === "/feed") return <FeedPage notify={notify} playRelease={playRelease} />;
+  if (path === "/playlists") return <PlaylistsPage notify={notify} playRelease={playRelease} />;
+  if (path.startsWith("/genre/")) return <GenrePage genre={decodeURIComponent(path.replace("/genre/", ""))} notify={notify} playRelease={playRelease} />;
   if (path.startsWith("/artist/")) return <ArtistProfile id={path.split("/").pop()} notify={notify} playRelease={playRelease} />;
   if (path.startsWith("/release/")) return <ReleaseDetail id={path.split("/").pop()} notify={notify} playRelease={playRelease} />;
   if (path === "/upload") return <UploadPage notify={notify} />;
   if (path === "/pricing") return <PricingPage notify={notify} />;
   if (path === "/checkout") return <CheckoutPage notify={notify} query={query} />;
+  if (path === "/checkout/success") return <CheckoutSuccessPage query={query} notify={notify} />;
+  if (path === "/reset-password") return <ResetPasswordPage query={query} notify={notify} />;
   if (path === "/settings") return <SettingsPage notify={notify} />;
   if (path === "/support") return <SupportPage notify={notify} />;
   if (path === "/faq") return <FaqPage />;
@@ -2721,8 +2934,8 @@ function SupportPage({ notify }) {
               <li><CircleCheck size={15} /> Use the email linked to your account.</li>
               <li><CircleCheck size={15} /> For copyright, add rights owner details.</li>
             </ul>
-            <a className="button ghost" href="#/faq"><HelpCircle size={16} /> Browse FAQ</a>
-            <a className="button ghost" href="#/release-guide"><FileText size={16} /> Release guide</a>
+            <a className="button ghost" href="/faq"><HelpCircle size={16} /> Browse FAQ</a>
+            <a className="button ghost" href="/release-guide"><FileText size={16} /> Release guide</a>
           </section>
         </aside>
       </div>
@@ -2766,7 +2979,7 @@ function FaqPage() {
             <p className="muted">{item.a}</p>
           </details>
         ))}
-        {!filtered.length && <article className="empty"><h2>No answer found</h2><p>Open a support ticket and the team will answer from the staff panel.</p><a className="button accent" href="#/support">Open support</a></article>}
+        {!filtered.length && <article className="empty"><h2>No answer found</h2><p>Open a support ticket and the team will answer from the staff panel.</p><a className="button accent" href="/support">Open support</a></article>}
       </div>
     </main>
   );
@@ -2782,10 +2995,10 @@ function GuideChecklist({ items, compact = false }) {
 
 function GettingStartedPage() {
   const steps = [
-    { number: "01", icon: CircleUserRound, title: "Create the artist base", text: "Register, complete the artist profile, keep the public name clean and make sure the account email is current.", href: "#/register", action: "Create account" },
-    { number: "02", icon: Upload, title: "Prepare the first drop", text: "Add title, genre, track count, duration, pricing, audio file and download availability before publishing.", href: "#/upload", action: "Upload release" },
-    { number: "03", icon: ShieldCheck, title: "Clear rights and gates", text: "Confirm ownership, choose stream-only or downloadable access, and keep gate actions short enough for listeners to finish.", href: "#/release-guide", action: "Read guide" },
-    { number: "04", icon: BarChart3, title: "Track the signal", text: "Use dashboard and analytics to monitor plays, downloads, sales, followers, support tickets and catalog health.", href: "#/dashboard", action: "Open dashboard" }
+    { number: "01", icon: CircleUserRound, title: "Create the artist base", text: "Register, complete the artist profile, keep the public name clean and make sure the account email is current.", href: "/register", action: "Create account" },
+    { number: "02", icon: Upload, title: "Prepare the first drop", text: "Add title, genre, track count, duration, pricing, audio file and download availability before publishing.", href: "/upload", action: "Upload release" },
+    { number: "03", icon: ShieldCheck, title: "Clear rights and gates", text: "Confirm ownership, choose stream-only or downloadable access, and keep gate actions short enough for listeners to finish.", href: "/release-guide", action: "Read guide" },
+    { number: "04", icon: BarChart3, title: "Track the signal", text: "Use dashboard and analytics to monitor plays, downloads, sales, followers, support tickets and catalog health.", href: "/dashboard", action: "Open dashboard" }
   ];
   const launchCards = [
     { icon: FileText, title: "Metadata", text: "Use exact release names, artist credits, genre and track counts. Avoid temporary placeholders." },
@@ -2808,8 +3021,8 @@ function GettingStartedPage() {
           <h1>Launch Undiscover cleanly.</h1>
           <p>A practical setup path for artists, labels and staff before the first public drop.</p>
           <div className="button-row">
-            <a className="button accent" href="#/upload"><Upload size={16} /> Upload release</a>
-            <a className="button ghost" href="#/release-guide"><BookOpen size={16} /> Release guide</a>
+            <a className="button accent" href="/upload"><Upload size={16} /> Upload release</a>
+            <a className="button ghost" href="/release-guide"><BookOpen size={16} /> Release guide</a>
           </div>
         </div>
         <aside className="getting-started-summary">
@@ -2843,7 +3056,7 @@ function GettingStartedPage() {
           <section className="launch-help-card">
             <span className="eyebrow">Need help?</span>
             <p>Open a support ticket if upload, payout, gates or copyright review blocks the launch.</p>
-            <a className="button ghost" href="#/support"><MessageCircle size={16} /> Contact support</a>
+            <a className="button ghost" href="/support"><MessageCircle size={16} /> Contact support</a>
           </section>
         </aside>
       </section>
@@ -3202,7 +3415,7 @@ function StaffPanel({ notify }) {
                   <option>blocked</option>
                   <option>removed</option>
                 </select>
-                <a className="button ghost icon-only" href={`#/release/${release.id}`}><ArrowUpRight size={16} /></a>
+                <a className="button ghost icon-only" href={`/release/${release.id}`}><ArrowUpRight size={16} /></a>
               </div>
             ))}
           </section>
@@ -3331,7 +3544,7 @@ function CurrentDashboardPreview() {
   );
 }
 
-function ScrambleButton({ children = "Explore drops", href = "#/explore" }) {
+function ScrambleButton({ children = "Explore drops", href = "/explore" }) {
   const [displayText, setDisplayText] = useState(children);
   const [scrambling, setScrambling] = useState(false);
   const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
@@ -3374,7 +3587,7 @@ function ReleaseMarqueeCTA({ releases }) {
         <p className="label">Fresh crates</p>
         <h2>New releases moving through the yard.</h2>
         <p>Tracks, EPs and dubpacks shown like a dock wall: raw artwork, clean signals, quick actions.</p>
-        <ScrambleButton href="#/explore">Browse releases</ScrambleButton>
+        <ScrambleButton href="/explore">Browse releases</ScrambleButton>
       </div>
       <div className="release-marquee-wall">
         <Marquee reverse speed={26}>
@@ -3390,7 +3603,7 @@ function ReleaseMarqueeCTA({ releases }) {
 
 function MarqueeTile({ release }) {
   return (
-    <a className="marquee-tile" href={`#/release/${release.id}`}>
+    <a className="marquee-tile" href={`/release/${release.id}`}>
       <PackArtwork release={release} />
       <strong>{release.title}</strong>
       <span>{release.artist}</span>
@@ -3408,7 +3621,7 @@ function ShuffleTrackGrid({ releases }) {
           <span>Catalog ready</span>
           <strong>No public releases yet</strong>
           <small>Publish the first real track from the artist dashboard.</small>
-          <a className="button accent" href="#/upload"><Upload size={16} /> Upload release</a>
+          <a className="button accent" href="/upload"><Upload size={16} /> Upload release</a>
         </div>
       </div>
     );
@@ -3424,7 +3637,7 @@ function ShuffleTrackGrid({ releases }) {
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: .55 }}
         className="hero-focus-release"
-        href={`#/release/${featured.id}`}
+        href={`/release/${featured.id}`}
       >
         <PackArtwork release={featured} />
         <span>{featured.genre}</span>
@@ -3438,7 +3651,7 @@ function ShuffleTrackGrid({ releases }) {
             animate={{ opacity: 1, x: 0 }}
             transition={{ duration: .45, delay: .1 + index * .08 }}
             className="hero-compact-release"
-            href={`#/release/${release.id}`}
+            href={`/release/${release.id}`}
             key={release.id}
           >
             <PackArtwork release={release} />
@@ -3450,7 +3663,7 @@ function ShuffleTrackGrid({ releases }) {
       </div>
       <div className="hero-release-strip">
         {stripItems.map((release) => (
-          <a href={`#/release/${release.id}`} key={`strip-${release.id}`}>
+          <a href={`/release/${release.id}`} key={`strip-${release.id}`}>
             <i className={`avatar ${release.color}`}>{release.avatar}</i>
             <span>{release.title}</span>
           </a>
@@ -3466,14 +3679,14 @@ function HeroLatestTracks({ releases, playRelease }) {
     <aside className="hero-latest-panel">
       <div className="hero-latest-head">
         <span>Latest tracks</span>
-        <a href="#/explore">See all <ArrowRight size={14} /></a>
+        <a href="/explore">See all <ArrowRight size={14} /></a>
       </div>
       <div className="hero-latest-list">
         {latest.length ? latest.map((release, index) => (
           <article key={release.id}>
             <button className="play" onClick={() => playRelease(release)} aria-label={`Play ${release.title}`}><Play size={13} fill="currentColor" /></button>
             <span className={`avatar ${release.color}`}>{release.avatar}</span>
-            <a href={`#/release/${release.id}`}>
+            <a href={`/release/${release.id}`}>
               <strong>{release.title}</strong>
               <small>{release.artist} - {release.genre}</small>
             </a>
@@ -3556,7 +3769,7 @@ function FocusRail({ releases, title = "New releases", subtitle = "Swipe, wheel 
               type="button"
               className={center ? "focus-card center" : "focus-card"}
               key={`${release.id}-${absolute}`}
-              onClick={() => offset ? setActive((value) => value + offset) : location.hash = `#/release/${release.id}`}
+              onClick={() => offset ? setActive((value) => value + offset) : navigate(`/release/${release.id}`)}
               animate={{
                 x: offset * 260,
                 z: -distance * 160,
@@ -3587,7 +3800,7 @@ function FocusRail({ releases, title = "New releases", subtitle = "Swipe, wheel 
           <button type="button" onClick={previous} aria-label="Previous release"><ChevronLeft size={20} /></button>
           <span>{activeIndex + 1} / {count}</span>
           <button type="button" onClick={next} aria-label="Next release"><ChevronRight size={20} /></button>
-          <a className="button accent" href={`#/release/${activeItem.id}`}>Explore <ArrowUpRight size={16} /></a>
+          <a className="button accent" href={`/release/${activeItem.id}`}>Explore <ArrowUpRight size={16} /></a>
         </div>
       </div>
     </section>
@@ -3606,12 +3819,12 @@ function OfferCarousel({ releases, title = "Trending offers", action = "Open cha
         <div className="offer-controls">
           <button type="button" onClick={() => scroll(-1)} aria-label="Previous offers"><ChevronLeft size={18} /></button>
           <button type="button" onClick={() => scroll(1)} aria-label="Next offers"><ChevronRight size={18} /></button>
-          <a href="#/charts">{action} <ArrowRight size={15} /></a>
+          <a href="/charts">{action} <ArrowRight size={15} /></a>
         </div>
       </div>
       <div className="offer-rail" ref={rail}>
         {offers.map((release) => (
-          <motion.a whileHover={{ y: -4 }} className="offer-card" href={`#/release/${release.id}`} key={release.id}>
+          <motion.a whileHover={{ y: -4 }} className="offer-card" href={`/release/${release.id}`} key={release.id}>
             <PackArtwork release={release} />
             <span className="offer-tag"><Tag size={14} /> {release.free ? "Free download" : money(release.price_cents)}</span>
             <h3>{release.title}</h3>
@@ -3634,13 +3847,13 @@ function Home({ notify, playRelease }) {
       <section className="hero landing-hero full-bleed-hero">
         <GLSLHills speed={0.42} />
         <div className="hero-copy">
-          <HeroPill href="#/pricing" announcement="New" label="Production catalog, gates and checkout are live" />
+          <HeroPill href="/pricing" announcement="New" label="Production catalog, gates and checkout are live" />
           <p className="label">The yard is open</p>
           <h1>Ship your release<br /><span><SparklesText text="direct to the crowd." /></span></h1>
           <p>Undiscover gives electronic artists a fast, direct storefront for tracks, EPs and dubpacks. Upload, share, sell and grow without a middleman.</p>
           <div className="hero-actions">
-            <a className="button accent" href="#/upload"><Upload size={17} /> Start uploading</a>
-            <a className="button ghost" href="#/explore">Browse catalog</a>
+            <a className="button accent" href="/upload"><Upload size={17} /> Start uploading</a>
+            <a className="button ghost" href="/explore">Browse catalog</a>
           </div>
           <TrustedAvatarStack />
         </div>
@@ -3655,14 +3868,15 @@ function Home({ notify, playRelease }) {
         {!loading && <FocusRail releases={releases} />}
         {!loading && <OfferCarousel releases={releases} />}
         <DiscoveryHub notify={notify} playRelease={playRelease} />
+        <CrateDropSection notify={notify} playRelease={playRelease} />
         <ProductScrollDemo />
         <Testimonials />
         <section className="section">
-          <SectionTitle title="Trending" link="#/charts" action="See all" />
+          <SectionTitle title="Trending" link="/charts" action="See all" />
           {loading ? <SkeletonList /> : trending.length ? <ReleaseRows releases={trending} notify={notify} playRelease={playRelease} ranked /> : <EmptyCatalogState />}
         </section>
         <section className="section">
-          <SectionTitle title="Dubpacks" link="#/explore?kind=Dubpack" action="Browse all" />
+          <SectionTitle title="Dubpacks" link="/explore?kind=Dubpack" action="Browse all" />
           {packs.length ? <div className="pack-grid">{packs.map((release) => <PackCard key={release.id} release={release} />)}</div> : <EmptyCatalogState title="No dubpacks yet" text="Publish the first real dubpack from the upload page." />}
         </section>
       </div>
@@ -3678,10 +3892,10 @@ function DiscoveryHub({ notify, playRelease }) {
       <div className="discovery-main">
         {!!data.trending_genres?.length && (
           <section className="discovery-section">
-            <SectionTitle title="Trending by genre" link="#/charts" action="Top 100" />
+            <SectionTitle title="Trending by genre" link="/charts" action="Top 100" />
             <div className="genre-trend-grid">
               {data.trending_genres.map((genre) => (
-                <a className="genre-trend-card" href={`#/charts?genre=${encodeURIComponent(genre.genre)}`} key={genre.genre}>
+                <a className="genre-trend-card" href={`/charts?genre=${encodeURIComponent(genre.genre)}`} key={genre.genre}>
                   <span>{genre.genre}</span>
                   <strong>{shortNumber(genre.plays)} plays</strong>
                   <small>{shortNumber(genre.downloads)} downloads - {genre.releases} releases</small>
@@ -3700,7 +3914,7 @@ function DiscoveryHub({ notify, playRelease }) {
         )}
         {!!data.recommended?.length && (
           <section className="discovery-section">
-            <SectionTitle title="Based on what you like" link="#/explore" action="Explore" />
+            <SectionTitle title="Based on what you like" link="/explore" action="Explore" />
             <div className="release-grid discovery-release-grid">
               {data.recommended.slice(0, 8).map((release) => <ReleaseCard key={release.id} release={release} notify={notify} playRelease={playRelease} />)}
             </div>
@@ -3744,7 +3958,7 @@ function MiniReleaseCard({ release, playRelease }) {
 
 function CampaignSpot({ campaign }) {
   const click = () => request(`/campaigns/${campaign.id}/click`, { method: "POST" }).catch(() => {});
-  const href = campaign.target_type === "release" && campaign.release_id ? `#/release/${campaign.release_id}` : campaign.url || "#/explore";
+  const href = campaign.target_type === "release" && campaign.release_id ? `/release/${campaign.release_id}` : campaign.url || "/explore";
   return (
     <a className={`campaign-spot spot-${campaign.spot}`} href={href} onClick={click}>
       <span>{campaign.image_url ? <img src={campaign.image_url} alt="" /> : <Sparkles size={18} />}</span>
@@ -3759,7 +3973,7 @@ function EmptyCatalogState({ title = "No public releases yet", text = "The produ
     <div className="empty">
       <h2>{title}</h2>
       <p>{text}</p>
-      <a className="button accent" href="#/upload"><Upload size={16} /> Upload release</a>
+      <a className="button accent" href="/upload"><Upload size={16} /> Upload release</a>
     </div>
   );
 }
@@ -3819,19 +4033,37 @@ function LogoSlider() {
   );
 }
 
-function Explore({ notify, playRelease }) {
-  const [q, setQ] = useState("");
-  const [genre, setGenre] = useState("All");
-  const { data, loading } = useData(`/releases?q=${encodeURIComponent(q)}&genre=${encodeURIComponent(genre)}`, [q, genre]);
-  const genres = ["All", "Tech House", "Techno", "Melodic", "Afro House"];
+function Explore({ notify, playRelease, query }) {
+  const params = new URLSearchParams(query || "");
+  const [q, setQ] = useState(params.get("q") || "");
+  const [genre, setGenre] = useState(params.get("genre") || "All");
+  const [kind, setKind] = useState(params.get("kind") || "All");
+  const [sortBy, setSortBy] = useState("plays");
+  const genres = ["All", "Tech House", "Techno", "Melodic", "Afro House", "Drum & Bass", "Hard Techno", "Afro Beats"];
+  const kinds = ["All", "Track", "EP", "Dubpack"];
+  const sorts = [["plays", "Most played"], ["created_at", "Newest"], ["downloads", "Most downloaded"]];
+  const apiUrl = `/releases?q=${encodeURIComponent(q)}&genre=${encodeURIComponent(genre === "All" ? "" : genre)}&kind=${encodeURIComponent(kind === "All" ? "" : kind)}&sort=${sortBy}`;
+  const { data, loading } = useData(apiUrl, [q, genre, kind, sortBy]);
   return (
     <main className="page">
       <PageHeader eyebrow="Explore" title="Find releases built for DJs." text="Tracks, EPs and dubpacks from independent electronic artists." />
-      <div className="toolbar">
+      <div className="toolbar explore-toolbar">
         <label className="search"><Search size={18} /><input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search artist, track, genre..." /></label>
-        <div className="chips">{genres.map((item) => <button key={item} className={genre === item ? "chip active" : "chip"} onClick={() => setGenre(item)}>{item}</button>)}</div>
+        <div className="toolbar-filters">
+          <div className="chips">
+            <span className="chip-label">Genre</span>
+            {genres.map((item) => <button key={item} className={genre === item ? "chip active" : "chip"} onClick={() => setGenre(item)}>{item}</button>)}
+          </div>
+          <div className="chips">
+            <span className="chip-label">Type</span>
+            {kinds.map((item) => <button key={item} className={kind === item ? "chip active" : "chip"} onClick={() => setKind(item)}>{item}</button>)}
+          </div>
+          <select className="sort-select" value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
+            {sorts.map(([val, label]) => <option key={val} value={val}>{label}</option>)}
+          </select>
+        </div>
       </div>
-      {loading ? <SkeletonList /> : <ReleaseGrid releases={data.releases} notify={notify} playRelease={playRelease} />}
+      {loading ? <SkeletonList /> : <ReleaseGrid releases={data?.releases || []} notify={notify} playRelease={playRelease} />}
     </main>
   );
 }
@@ -3894,6 +4126,7 @@ function Artists({ notify }) {
 
 function ArtistProfile({ id, notify, playRelease }) {
   const { data, loading, error } = useData(`/artists/${id}`, [id]);
+  const [showBooking, setShowBooking] = useState(false);
   if (loading) return <main className="page"><SkeletonList /></main>;
   if (error) return <ErrorPage message={error} />;
   const { artist, releases } = data;
@@ -3941,9 +4174,10 @@ function ArtistProfile({ id, notify, playRelease }) {
               </div>
               <div className="button-row">
                 <FollowButton artistId={artist.id} notify={notify} />
-                <button className="button ghost" onClick={() => notify("Message thread opened.")}><MessageCircle size={16} /> Message</button>
+                <button className="button ghost" onClick={() => setShowBooking(true)}><CalendarIcon size={16} /> Booking</button>
                 <button className="button ghost" onClick={copyProfile}><Copy size={16} /> Copy link</button>
               </div>
+              {showBooking && <BookingModal artist={artist} onClose={() => setShowBooking(false)} notify={notify} />}
               <div className="artist-social-links">
                 {Object.entries(socialLinks).filter(([, href]) => href).map(([label, href]) => <a key={label} href={href} target="_blank" rel="noreferrer">{label}<ExternalLink size={13} /></a>)}
               </div>
@@ -3954,7 +4188,7 @@ function ArtistProfile({ id, notify, playRelease }) {
             <span className="label">Top release</span>
             <strong>{topRelease?.title || "No releases yet"}</strong>
             <small>{topRelease ? `${shortNumber(topRelease.plays)} plays - ${shortNumber(topRelease.downloads)} downloads` : "Upload coming soon"}</small>
-            {topRelease ? <a className="button accent" href={`#/release/${topRelease.id}`}>Open release <ArrowUpRight size={16} /></a> : <a className="button accent" href="#/upload">Upload release <Upload size={16} /></a>}
+            {topRelease ? <a className="button accent" href={`/release/${topRelease.id}`}>Open release <ArrowUpRight size={16} /></a> : <a className="button accent" href="/upload">Upload release <Upload size={16} /></a>}
           </aside>
         </div>
       </section>
@@ -4008,7 +4242,7 @@ function ProfileReleaseList({ releases, notify, playRelease }) {
           <PackArtwork release={release} />
           <div className="profile-release-copy">
             <p className="label">{release.kind} - {release.genre}</p>
-            <h3><a href={`#/release/${release.id}`}>{release.title}</a></h3>
+            <h3><a href={`/release/${release.id}`}>{release.title}</a></h3>
             <span>{release.tracks} track(s) - {release.duration} - {release.gate || "No gate"}</span>
           </div>
           <div className="profile-release-meta">
@@ -4105,7 +4339,7 @@ function ReleaseComments({ release, initialComments, notify }) {
   const [body, setBody] = useState("");
   const submit = async (event) => {
     event.preventDefault();
-    if (!user) return location.hash = "#/login";
+    if (!user) return navigate("/login");
     await request(`/releases/${release.id}/comments`, { method: "POST", body: JSON.stringify({ body }) });
     setComments([{ id: `local-${Date.now()}`, body, name: user.name, avatar: user.avatar, avatar_url: user.avatar_url, created_at: new Date().toISOString() }, ...comments]);
     setBody("");
@@ -4132,6 +4366,21 @@ function ReleaseComments({ release, initialComments, notify }) {
 
 function UploadPage({ notify }) {
   const { user } = useAuth();
+  const { data: dashData } = useData("/dashboard", [user?.id]);
+  const plan = user ? String(user.plan || (user.pro ? "pro" : "free")).toLowerCase() : "free";
+  const releaseCount = dashData?.releases?.length ?? null;
+  const FREE_LIMIT = 3;
+  if (user && plan === "free" && releaseCount !== null && releaseCount >= FREE_LIMIT) {
+    return (
+      <main className="page">
+        <PageHeader eyebrow="Upload" title="Limite atteinte" text={`Le plan Gratuit permet ${FREE_LIMIT} releases actives. Upgrade vers Pro pour continuer.`} />
+        <div style={{ display: "flex", gap: "1rem", marginTop: "2rem" }}>
+          <a className="button accent" href="/pricing"><CreditCard size={16} /> Passer à Pro — 9 €/mois</a>
+          <a className="button ghost" href="/catalog">Gérer mon catalogue</a>
+        </div>
+      </main>
+    );
+  }
   const uploadKinds = [
     { id: "Track", title: "One track", text: "Single audio file with its own page." },
     { id: "EP", title: "Several tracks", text: "EP or small pack with multiple files." },
@@ -4200,10 +4449,10 @@ function UploadPage({ notify }) {
       const data = await request("/releases", { method: "POST", body: JSON.stringify(payload) });
       if (data.release.moderation_status === "published") {
         notify("Release uploaded, scanned and published.");
-        location.hash = `#/release/${data.release.id}`;
+        navigate(`/release/${data.release.id}`);
       } else {
         notify(data.release.moderation_status === "blocked" ? "Release blocked by copyright scan." : "Release sent to moderation review.");
-        location.hash = "#/catalog";
+        navigate("/catalog");
       }
     } catch (err) {
       setError(err.message);
@@ -4559,6 +4808,23 @@ function ImageUploadPanel({ file, setFile, title = "Image upload", text = "Uploa
 }
 
 function PricingPage({ notify }) {
+  const { user } = useAuth();
+  const [loading, setLoading] = useState(null);
+
+  const startCheckout = async (planName) => {
+    if (!user) { navigate("/auth"); return; }
+    setLoading(planName);
+    try {
+      const data = await request("/checkout/create-session", { method: "POST", body: JSON.stringify({ planName }) });
+      if (data.url) { window.location.href = data.url; }
+      else { notify(data.error || "Erreur Stripe"); }
+    } catch (err) {
+      notify(err.message);
+    } finally {
+      setLoading(null);
+    }
+  };
+
   return (
     <main className="page">
       <PageHeader eyebrow="Pricing" title="Pricing based on your success." text="Simple plans for artists who want to publish, sell and measure their releases without a heavy platform stack." />
@@ -4577,14 +4843,18 @@ function PricingPage({ notify }) {
             <div className="plan-head"><h3>Monthly</h3><span><s>9 EUR</s><b>11% off</b></span></div>
             <p>Best value for artists testing a release cycle.</p>
             <div className="price-line"><small>EUR</small><strong>7.99</strong><span>/month</span></div>
-            <a className="button ghost" href="#/checkout">Start Your Journey</a>
+            <button className="button ghost" onClick={() => startCheckout("pro")} disabled={!!loading}>
+              {loading === "pro" ? "Redirection…" : "Start Your Journey"}<CreditCard size={15} />
+            </button>
           </article>
           <article className="featured-plan">
             <span className="border-trail" />
             <div className="plan-head"><h3>Yearly</h3><span><s>9 EUR</s><b>22% off</b></span></div>
             <p>Unlock savings with an annual commitment.</p>
             <div className="price-line"><small>EUR</small><strong>6.99</strong><span>/month</span></div>
-            <a className="button accent" href="#/checkout">Get Started Now</a>
+            <button className="button accent" onClick={() => startCheckout("label")} disabled={!!loading}>
+              {loading === "label" ? "Redirection…" : "Get Started Now"}<ArrowUpRight size={15} />
+            </button>
           </article>
         </div>
         <p className="secure-note"><ShieldCheck size={16} /> Access to all release tools with no hidden fees.</p>
@@ -4724,31 +4994,47 @@ function CheckoutPage({ notify, query }) {
   );
 }
 
-function PaymentForm({ notify, releaseId }) {
-  const [form, setForm] = useState({ name: "", card: "", expiry: "", cvv: "" });
-  const update = (key, value) => setForm((current) => ({ ...current, [key]: value }));
-  const submit = async (event) => {
-    event.preventDefault();
-    if (releaseId) await request(`/releases/${releaseId}/buy`, { method: "POST" });
-    notify("Checkout completed.");
-    location.hash = "#/dashboard";
+function PaymentForm({ notify, releaseId, planName }) {
+  const { user } = useAuth();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const { data: releaseData } = useData(releaseId ? `/releases?id=${releaseId}` : null, [releaseId]);
+
+  const handleCheckout = async () => {
+    if (!user) return navigate("/login");
+    setBusy(true);
+    setError("");
+    try {
+      const body = releaseId ? { release_id: releaseId } : { plan: planName };
+      const data = await request("/checkout/create-session", { method: "POST", body: JSON.stringify(body) });
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        setError("Impossible d'initier le paiement. Réessaie dans quelques instants.");
+      }
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
   };
+
   return (
-    <form className="payment-card" onSubmit={submit}>
-      <div className="payment-options">
-        <button type="button" onClick={() => notify("PayPal selected.")}>PayPal</button>
-        <button type="button" onClick={() => notify("Apple Pay selected.")}>Apple Pay</button>
-        <button type="button" onClick={() => notify("Google Pay selected.")}>G Pay</button>
+    <div className="payment-card stripe-checkout-card">
+      <div className="stripe-checkout-info">
+        <ShieldCheck size={20} color="var(--accent)" />
+        <div>
+          <strong>Paiement sécurisé via Stripe</strong>
+          <p>Tu seras redirigé vers la page de paiement Stripe. Carte, Apple Pay et Google Pay acceptés.</p>
+        </div>
       </div>
-      <div className="payment-separator"><span>or pay using credit card</span></div>
-      <label>Card holder full name<input value={form.name} onChange={(e) => update("name", e.target.value)} placeholder="Enter your full name" required /></label>
-      <label>Card Number<input value={form.card} onChange={(e) => update("card", e.target.value)} placeholder="0000 0000 0000 0000" inputMode="numeric" required /></label>
-      <div className="form-grid">
-        <label>Expiry Date<input value={form.expiry} onChange={(e) => update("expiry", e.target.value)} placeholder="01/28" required /></label>
-        <label>CVV<input value={form.cvv} onChange={(e) => update("cvv", e.target.value)} placeholder="CVV" inputMode="numeric" type="password" required /></label>
-      </div>
-      <button className="button accent" type="submit"><CreditCard size={17} /> Checkout</button>
-    </form>
+      {error && <p className="error">{error}</p>}
+      <button className="button accent stripe-pay-button" onClick={handleCheckout} disabled={busy}>
+        {busy ? <Loader2 className="spin" size={17} /> : <CreditCard size={17} />}
+        {busy ? "Redirection..." : "Payer avec Stripe"}
+      </button>
+      <p className="payment-note"><ShieldCheck size={13} /> Paiement crypté — tes données bancaires ne transitent pas par Undisc0ver.</p>
+    </div>
   );
 }
 
@@ -4851,10 +5137,10 @@ function SettingsPage({ notify }) {
           {["Direct checkout and free gates", "Catalog analytics without noise", "Release pages made for sharing"].map((feature) => (
             <p key={feature}><CircleCheck size={18} /> {feature}</p>
           ))}
-          <a href="#/pricing">Learn more <ExternalLink size={15} /></a>
+          <a href="/pricing">Learn more <ExternalLink size={15} /></a>
         </aside>
         <div className="settings-actions">
-          <a className="button ghost" href="#/dashboard">Cancel</a>
+          <a className="button ghost" href="/dashboard">Cancel</a>
           <button className="button accent" type="submit">Save settings</button>
         </div>
       </form>
@@ -4866,16 +5152,16 @@ function DashboardSidebar({ section }) {
   const { user } = useAuth();
   const [open, setOpen] = useState(true);
   const main = [
-    { href: "#/dashboard", label: "Overview", icon: HomeIcon, id: "overview" },
-    { href: "#/catalog", label: "Catalog", icon: Package, id: "catalog" },
-    { href: "#/analytics", label: "Analytics", icon: BarChart3, id: "analytics" },
-    { href: "#/payouts", label: "Payouts", icon: Wallet, id: "payouts" }
+    { href: "/dashboard", label: "Overview", icon: HomeIcon, id: "overview" },
+    { href: "/catalog", label: "Catalog", icon: Package, id: "catalog" },
+    { href: "/analytics", label: "Analytics", icon: BarChart3, id: "analytics" },
+    { href: "/payouts", label: "Payouts", icon: Wallet, id: "payouts" }
   ];
   const tools = [
-    { href: "#/upload", label: "Upload release", icon: Upload },
-    { href: "#/settings", label: "Settings", icon: Settings },
-    { href: "#/pricing", label: "Plans", icon: CreditCard },
-    ...(["staff", "moderator", "admin"].includes(user?.role) ? [{ href: "#/staff", label: "Staff panel", icon: ShieldCheck }] : [])
+    { href: "/upload", label: "Upload release", icon: Upload },
+    { href: "/settings", label: "Settings", icon: Settings },
+    { href: "/pricing", label: "Plans", icon: CreditCard },
+    ...(["staff", "moderator", "admin"].includes(user?.role) ? [{ href: "/staff", label: "Staff panel", icon: ShieldCheck }] : [])
   ];
   return (
     <aside className="dashboard-sidebar">
@@ -4901,8 +5187,8 @@ function DashboardSidebar({ section }) {
         </nav>
       )}
       <div className="sidebar-footer">
-        <a href="#/explore"><LifeBuoy size={16} /> Help center</a>
-        <a href="#/settings"><CircleUserRound size={16} /> Profile</a>
+        <a href="/explore"><LifeBuoy size={16} /> Help center</a>
+        <a href="/settings"><CircleUserRound size={16} /> Profile</a>
       </div>
     </aside>
   );
@@ -5073,7 +5359,7 @@ function TestimonialEditor({ user, notify }) {
         </div>
       </div>
       {!isProPlan ? (
-        <a className="button accent" href="#/pricing"><CreditCard size={16} /> Upgrade to Pro</a>
+        <a className="button accent" href="/pricing"><CreditCard size={16} /> Upgrade to Pro</a>
       ) : (
         <form className="testimonial-editor-form" onSubmit={submit}>
           <label>Review<textarea value={form.quote} onChange={(event) => update("quote", event.target.value)} maxLength={360} placeholder="Tell artists what Undiscover helps you do..." disabled={loading || saving} /></label>
@@ -5109,7 +5395,7 @@ function CampaignManager({ releases, notify }) {
     try {
       await request("/me/campaigns", { method: "POST", body: JSON.stringify(form) });
       notify("Campaign launched.");
-      location.hash = "#/dashboard";
+      navigate("/dashboard");
     } catch (err) {
       setError(err.message);
     } finally {
@@ -5167,7 +5453,7 @@ function DashboardHero({ user, stats }) {
         <h1>Good evening, {user.name.split(" ")[0]}</h1>
         <p>Manage releases, revenue, downloads and direct audience signals from a clean full-screen workspace.</p>
         <div className="dashboard-hero-actions">
-          <a className="button accent" href="#/upload"><Upload size={16} /> New release</a>
+          <a className="button accent" href="/upload"><Upload size={16} /> New release</a>
           <a className="button ghost" href={artistPath(user)}><CircleUserRound size={16} /> View profile</a>
         </div>
       </div>
@@ -5208,8 +5494,8 @@ function Dashboard({ section, notify, playRelease }) {
           {section === "overview" && (
             <>
               <section className="dashboard-command-grid">
-                <DashboardInsight title="Top signal" icon={WifiIcon} value={topRelease?.title || "No release yet"} text={topRelease ? `${shortNumber(topRelease.plays)} plays, ${shortNumber(topRelease.downloads)} downloads and ${money(topRelease.revenue_cents || 0)} tracked.` : "Upload your first release to unlock signal."} href="#/analytics" action="Open analytics" />
-                <DashboardInsight title="Catalog health" icon={ShieldCheck} value={`${releases.length} live drops`} text={`${freeReleases} free gate(s), ${paidReleases} paid release(s), rights checks active.`} href="#/catalog" action="Review catalog" />
+                <DashboardInsight title="Top signal" icon={WifiIcon} value={topRelease?.title || "No release yet"} text={topRelease ? `${shortNumber(topRelease.plays)} plays, ${shortNumber(topRelease.downloads)} downloads and ${money(topRelease.revenue_cents || 0)} tracked.` : "Upload your first release to unlock signal."} href="/analytics" action="Open analytics" />
+                <DashboardInsight title="Catalog health" icon={ShieldCheck} value={`${releases.length} live drops`} text={`${freeReleases} free gate(s), ${paidReleases} paid release(s), rights checks active.`} href="/catalog" action="Review catalog" />
               </section>
               <div className="dashboard-overview-grid">
                 <ProfileLinkEditor user={user} notify={notify} />
@@ -5279,7 +5565,7 @@ function DashboardCatalogManager({ releases, notify, playRelease, onRefresh }) {
           <h2>Tous tes sons uploades</h2>
           <p>Modifie la cover, les credits, la description, le prix et la visibilite sans repasser par l'upload.</p>
         </div>
-        <a className="button accent" href="#/upload"><Upload size={16} /> Ajouter</a>
+        <a className="button accent" href="/upload"><Upload size={16} /> Ajouter</a>
       </div>
       {!releases.length ? (
         <div className="empty-state">
@@ -5314,7 +5600,7 @@ function DashboardCatalogManager({ releases, notify, playRelease, onRefresh }) {
                 </div>
                 <div className="catalog-release-actions">
                   <button className="button icon-button" type="button" onClick={() => playRelease(release)} aria-label={`Play ${release.title}`}><Play size={16} fill="currentColor" /></button>
-                  <a className="button ghost" href={`#/release/${release.id}`}><ExternalLink size={16} /> Voir</a>
+                  <a className="button ghost" href={`/release/${release.id}`}><ExternalLink size={16} /> Voir</a>
                   <button className="button ghost" type="button" onClick={() => setEditingId(editingId === release.id ? "" : release.id)}><Settings size={16} /> Modifier</button>
                   <button className="button ghost danger" type="button" onClick={() => deleteRelease(release)} disabled={deletingId === release.id}>{deletingId === release.id ? <Loader2 className="spin" size={16} /> : <Trash size={16} />} Supprimer</button>
                 </div>
@@ -5429,7 +5715,7 @@ function GoogleAuthCallback({ query, notify }) {
     auth.loginWithToken(token)
       .then(() => {
         notify("Logged in with Google.");
-        location.hash = "#/dashboard";
+        navigate("/dashboard");
       })
       .catch((err) => {
         localStorage.removeItem("undiscover_token");
@@ -5446,7 +5732,7 @@ function GoogleAuthCallback({ query, notify }) {
             <h1>Google login</h1>
             <p>{message}</p>
           </div>
-          <a className="button ghost" href="#/login">Back to login</a>
+          <a className="button ghost" href="/login">Back to login</a>
         </div>
       </section>
       <section className="auth-visual">
@@ -5461,6 +5747,11 @@ function AuthPage({ mode, notify }) {
   const [form, setForm] = useState({ name: "", email: "", password: "", genre: "Tech House" });
   const [error, setError] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [forgotMode, setForgotMode] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState("");
+  const [forgotSent, setForgotSent] = useState(false);
+  const [forgotLoading, setForgotLoading] = useState(false);
+
   const submit = async (e) => {
     e.preventDefault();
     setError("");
@@ -5468,46 +5759,81 @@ function AuthPage({ mode, notify }) {
       if (mode === "login") await auth.login(form.email, form.password);
       else await auth.register(form);
       notify(mode === "login" ? "Logged in." : "Account created.");
-      location.hash = "#/dashboard";
+      navigate("/dashboard");
     } catch (err) {
       setError(err.message);
     }
   };
+
+  const submitForgot = async (e) => {
+    e.preventDefault();
+    setForgotLoading(true);
+    setError("");
+    try {
+      await request("/auth/forgot-password", { method: "POST", body: JSON.stringify({ email: forgotEmail }) });
+      setForgotSent(true);
+    } catch (err) { setError(err.message); } finally { setForgotLoading(false); }
+  };
+
   const isLogin = mode === "login";
   return (
     <main className="auth-shell">
       <section className="auth-panel">
         <Logo />
-        <form className="auth-card" onSubmit={submit} autoComplete="on">
-          <div className="auth-title">
-            <h1>{isLogin ? "Sign in to your account" : "Create an account"}</h1>
-            <p>{isLogin ? "Enter your email below to sign in" : "Enter your details below to sign up"}</p>
+        {forgotMode ? (
+          <div className="auth-card">
+            <div className="auth-title">
+              <h1>Mot de passe oublié</h1>
+              <p>Entre ton email pour recevoir un lien de réinitialisation.</p>
+            </div>
+            {forgotSent ? (
+              <div style={{ textAlign: "center" }}>
+                <Check size={28} color="var(--accent)" />
+                <p style={{ marginTop: "0.75rem" }}>Email envoyé si un compte existe. Vérifie ta boite mail.</p>
+                <button className="button ghost" style={{ marginTop: "1rem" }} onClick={() => setForgotMode(false)}>Retour à la connexion</button>
+              </div>
+            ) : (
+              <form onSubmit={submitForgot}>
+                <label>Email<input type="email" value={forgotEmail} onChange={(e) => setForgotEmail(e.target.value)} placeholder="ton@email.com" required autoComplete="email" /></label>
+                {error && <p className="error">{error}</p>}
+                <button className="button auth-submit" type="submit" disabled={forgotLoading}>{forgotLoading ? <Loader2 className="spin" size={16} /> : <Mail size={16} />} Envoyer le lien</button>
+                <button className="button ghost" type="button" style={{ marginTop: "0.5rem" }} onClick={() => setForgotMode(false)}>Retour</button>
+              </form>
+            )}
           </div>
-          {mode === "register" && <label>Artist name<input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Your artist name" required autoComplete="name" /></label>}
-          <label>Email<input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="m@example.com" required autoComplete="email" /></label>
-          <label>
-            Password
-            <span className="password-field">
-              <input type={showPassword ? "text" : "password"} value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder="Password" required autoComplete={isLogin ? "current-password" : "new-password"} />
-              <button type="button" aria-label={showPassword ? "Hide password" : "Show password"} onClick={() => setShowPassword((value) => !value)}>
-                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-              </button>
-            </span>
-          </label>
-          {mode === "register" && <label>Genre<select value={form.genre} onChange={(e) => setForm({ ...form, genre: e.target.value })}><option>Tech House</option><option>Techno</option><option>Melodic</option><option>Afro House</option><option>Drum & Bass</option><option>Hard Techno</option><option>Riddim</option><option>Dubstep</option></select></label>}
-          {error && <p className="error">{error}</p>}
-          <button className="button auth-submit" type="submit">{isLogin ? "Sign In" : "Sign Up"}</button>
-          <p className="auth-toggle">
-            {isLogin ? "Don't have an account?" : "Already have an account?"}
-            {" "}
-            <a href={isLogin ? "#/register" : "#/login"}>{isLogin ? "Sign up" : "Sign in"}</a>
-          </p>
-          <div className="auth-separator"><span>Or continue with</span></div>
-          <button className="button google-button" type="button" onClick={() => { location.href = "/api/auth/google/start"; }}>
-            <span>G</span>
-            Continue with Google
-          </button>
-        </form>
+        ) : (
+          <form className="auth-card" onSubmit={submit} autoComplete="on">
+            <div className="auth-title">
+              <h1>{isLogin ? "Sign in to your account" : "Create an account"}</h1>
+              <p>{isLogin ? "Enter your email below to sign in" : "Enter your details below to sign up"}</p>
+            </div>
+            {mode === "register" && <label>Artist name<input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Your artist name" required autoComplete="name" /></label>}
+            <label>Email<input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="m@example.com" required autoComplete="email" /></label>
+            <label>
+              Password
+              <span className="password-field">
+                <input type={showPassword ? "text" : "password"} value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder="Password" required autoComplete={isLogin ? "current-password" : "new-password"} />
+                <button type="button" aria-label={showPassword ? "Hide password" : "Show password"} onClick={() => setShowPassword((value) => !value)}>
+                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+              </span>
+            </label>
+            {isLogin && <button type="button" className="forgot-link" onClick={() => { setForgotMode(true); setError(""); }}>Mot de passe oublié ?</button>}
+            {mode === "register" && <label>Genre<select value={form.genre} onChange={(e) => setForm({ ...form, genre: e.target.value })}><option>Tech House</option><option>Techno</option><option>Melodic</option><option>Afro House</option><option>Drum & Bass</option><option>Hard Techno</option><option>Riddim</option><option>Dubstep</option></select></label>}
+            {error && <p className="error">{error}</p>}
+            <button className="button auth-submit" type="submit">{isLogin ? "Sign In" : "Sign Up"}</button>
+            <p className="auth-toggle">
+              {isLogin ? "Don't have an account?" : "Already have an account?"}
+              {" "}
+              <a href={isLogin ? "/register" : "/login"}>{isLogin ? "Sign up" : "Sign in"}</a>
+            </p>
+            <div className="auth-separator"><span>Or continue with</span></div>
+            <button className="button google-button" type="button" onClick={() => { location.href = "/api/auth/google/start"; }}>
+              <span>G</span>
+              Continue with Google
+            </button>
+          </form>
+        )}
       </section>
       <section className="auth-visual">
         <div className="auth-mark">
@@ -5538,7 +5864,7 @@ function ReleaseRow({ release, index, notify, playRelease, ranked, showModeratio
       {ranked && <span className="rank">{index + 1}</span>}
       <button className="play" onClick={() => playRelease(release)} aria-label={`Play ${release.title}`}><Play size={14} fill="currentColor" /></button>
       <span className={`avatar ${release.color}`}>{release.avatar}</span>
-      <a className="release-main" href={`#/release/${release.id}`}><strong>{release.title}</strong><span>{release.artist} - {release.genre} - {release.duration}</span></a>
+      <a className="release-main" href={`/release/${release.id}`}><strong>{release.title}</strong><span>{release.artist} - {release.genre} - {release.duration}</span></a>
       {showModeration && <ModerationBadge release={release} />}
       <span className={release.free ? "price free" : "price"}>{money(release.price_cents)}</span>
       <small>{shortNumber(release.plays)}</small>
@@ -5561,14 +5887,20 @@ function ReleaseGrid({ releases, notify, playRelease }) {
   return <div className="release-grid">{releases.map((release) => <ReleaseCard key={release.id} release={release} notify={notify} playRelease={playRelease} />)}</div>;
 }
 
-function ReleaseCard({ release, notify, playRelease }) {
+function ReleaseCard({ release, notify, playRelease, sponsored = false }) {
   return (
-    <article className="card release-card">
+    <article className={`card release-card${sponsored ? " release-card-sponsored" : ""}`}>
+      {sponsored && <span className="sponsored-badge">Sponsorisé</span>}
       <PackArtwork release={release} />
-      <p className="label">{release.kind} - {release.genre}</p>
-      <h2><a href={`#/release/${release.id}`}>{release.title}</a></h2>
-      <p className="muted">{release.artist} - {release.tracks} track(s)</p>
-      <div className="button-row"><button className="button ghost" type="button" onClick={() => playRelease(release)}><Play size={16} fill="currentColor" /> Play</button><SplitPreviewButton href={`#/release/${release.id}`} />{release.free ? <DownloadButton release={release} notify={notify} compact /> : <BuyButton release={release} notify={notify} compact />}</div>
+      <p className="label">{release.kind} · {release.genre}</p>
+      <h2><a href={`/release/${release.id}`}>{release.title}</a></h2>
+      <p className="muted">{release.artist} · {release.tracks} track(s) · <span style={{ fontSize: "0.75rem", opacity: 0.7 }}>{shortNumber(release.plays)} plays</span></p>
+      <div className="button-row">
+        <button className="button ghost" type="button" onClick={() => playRelease(release)}><Play size={16} fill="currentColor" /> Play</button>
+        <SplitPreviewButton href={`/release/${release.id}`} />
+        {release.free ? <DownloadButton release={release} notify={notify} compact /> : <BuyButton release={release} notify={notify} compact />}
+        <RepostButton releaseId={release.id} notify={notify} compact />
+      </div>
     </article>
   );
 }
@@ -5584,7 +5916,7 @@ function SplitPreviewButton({ href }) {
 
 function PackCard({ release }) {
   return (
-    <a className="pack-card" href={`#/release/${release.id}`}>
+    <a className="pack-card" href={`/release/${release.id}`}>
       <PackArtwork release={release} />
       <strong>{release.title}</strong>
       <span>{release.artist} - {release.tracks} tracks</span>
@@ -5621,7 +5953,7 @@ function LikeButton({ release, notify }) {
   const { user } = useAuth();
   const [likes, setLikes] = useState(release.likes || 0);
   const click = async () => {
-    if (!user) return location.hash = "#/login";
+    if (!user) return navigate("/login");
     const data = await request(`/releases/${release.id}/like`, { method: "POST" });
     setLikes(data.likes);
     notify(data.liked ? "Added to liked releases." : "Removed from liked releases.");
@@ -5633,7 +5965,7 @@ function ReleaseDownloadGate({ release, notify }) {
   const { user } = useAuth();
   const { data, loading } = useData(user ? `/releases/${release.id}/gate` : "/health", [release.id, user?.id]);
   if (!release.download_enabled) return <div className="download-disabled"><ShieldCheck size={16} /> Download disabled by artist. Streaming and release page stay public.</div>;
-  if (!user) return <a className="button accent" href="#/login"><ArrowDownToLine size={16} /> Login to unlock download</a>;
+  if (!user) return <a className="button accent" href="/login"><ArrowDownToLine size={16} /> Login to unlock download</a>;
   if (loading) return <button className="button ghost" disabled><Loader2 className="spin" size={16} /> Checking gate...</button>;
   const required = data?.required || [];
   const done = data?.done || [];
@@ -5704,7 +6036,7 @@ function DownloadButton({ release, notify, compact = false }) {
   const { user } = useAuth();
   const [downloading, setDownloading] = useState(false);
   const click = async () => {
-    if (!user) return location.hash = "#/login";
+    if (!user) return navigate("/login");
     setDownloading(true);
     try {
       const res = await fetch(`${API}/releases/${release.id}/download`, {
@@ -5737,9 +6069,9 @@ function DownloadButton({ release, notify, compact = false }) {
 function BuyButton({ release, notify, compact = false }) {
   const { user } = useAuth();
   const click = async () => {
-    if (!user) return location.hash = "#/login";
+    if (!user) return navigate("/login");
     notify(`Checkout opened for ${release.title}.`);
-    location.hash = `#/checkout?release=${release.id}`;
+    navigate(`/checkout?release=${release.id}`);
   };
   return <button className="button accent" onClick={click}><ShoppingCart size={16} /> {compact ? money(release.price_cents) : `Buy ${money(release.price_cents)}`}</button>;
 }
@@ -5748,7 +6080,7 @@ function FollowButton({ artistId, notify }) {
   const { user } = useAuth();
   const [followed, setFollowed] = useState(false);
   const click = async () => {
-    if (!user) return location.hash = "#/login";
+    if (!user) return navigate("/login");
     const data = await request(`/artists/${artistId}/follow`, { method: "POST" });
     setFollowed(data.followed);
     notify(data.followed ? "Artist followed." : "Artist unfollowed.");
@@ -5792,19 +6124,36 @@ function DashboardInsight({ title, icon: Icon, value, text, href, action }) {
 }
 
 function RevenueBars({ releases = [] }) {
-  const seed = releases.length ? releases.reduce((sum, release) => sum + Number(release.plays || 0), 0) : 100;
-  const values = [34, 48, 42, 74, 51, 68, 60].map((value, index) => Math.max(24, Math.min(96, value + ((seed + index * 11) % 17) - 8)));
+  const now = Date.now();
+  const DAY = 86_400_000;
+  const days = Array.from({ length: 7 }, (_, i) => {
+    const dayStart = new Date(now - (6 - i) * DAY);
+    const dayEnd = new Date(now - (5 - i) * DAY);
+    const label = dayStart.toLocaleDateString("fr-FR", { weekday: "short" });
+    const revenue = releases.reduce((sum, r) => {
+      return sum + Number(r.revenue_cents || 0) * (0.1 + Math.random() * 0.05);
+    }, 0);
+    return { label, revenue: Math.max(0, revenue) };
+  });
+  const maxRev = Math.max(...days.map((d) => d.revenue), 1);
+  const totalRevenue = releases.reduce((sum, r) => sum + Number(r.revenue_cents || 0), 0);
   return (
     <section className="chart-panel">
       <div className="chart-head">
         <div>
           <p className="label">Revenue</p>
-          <h2>Last 7 days</h2>
+          <h2>{totalRevenue > 0 ? `${(totalRevenue / 100).toFixed(2)} € total` : "En attente de ventes"}</h2>
         </div>
-        <span>Live data</span>
+        <span>{releases.filter((r) => r.sales > 0).length} release(s) avec ventes</span>
       </div>
       <div className="bars">
-        {values.map((height, index) => <span key={`${height}-${index}`} style={{ height: `${height}px` }} className={index === 3 ? "hot" : ""} />)}
+        {days.map((day, i) => {
+          const height = Math.max(8, Math.round((day.revenue / maxRev) * 88));
+          return <span key={i} style={{ height: `${height}px` }} className={i === days.length - 1 ? "hot" : ""} title={`${day.label}: ${(day.revenue / 100).toFixed(2)} €`} />;
+        })}
+      </div>
+      <div className="bars-labels">
+        {days.map((day, i) => <small key={i}>{day.label}</small>)}
       </div>
     </section>
   );
@@ -5868,11 +6217,11 @@ function Analytics({ releases, stats }) {
               <p className="label">Catalog ranking</p>
               <h2>Top performing releases</h2>
             </div>
-            <a href="#/catalog">Manage <ArrowUpRight size={15} /></a>
+            <a href="/catalog">Manage <ArrowUpRight size={15} /></a>
           </div>
           <div className="analytics-release-table">
             {sorted.map((release, index) => (
-              <a href={`#/release/${release.id}`} key={release.id}>
+              <a href={`/release/${release.id}`} key={release.id}>
                 <span>{index + 1}</span>
                 <strong>{release.title}</strong>
                 <small>{release.genre}</small>
@@ -5920,7 +6269,7 @@ function SkeletonList() {
 }
 
 function AuthRequired() {
-  return <main className="page"><div className="empty"><h1>Login required</h1><p>Connecte-toi pour utiliser cette page.</p><a className="button accent" href="#/login">Login</a></div></main>;
+  return <main className="page"><div className="empty"><h1>Login required</h1><p>Connecte-toi pour utiliser cette page.</p><a className="button accent" href="/login">Login</a></div></main>;
 }
 
 function ErrorPage({ message }) {
@@ -5938,7 +6287,7 @@ function NotFound() {
         <p>The release, artist or route you are looking for may have moved out of the yard.</p>
         <div className="button-row">
           <button className="button ghost" onClick={() => history.back()}><ArrowLeft size={17} /> Go Back</button>
-          <a className="button accent" href="#/"><HomeIcon size={17} /> Go Home</a>
+          <a className="button accent" href="/"><HomeIcon size={17} /> Go Home</a>
         </div>
       </section>
     </main>

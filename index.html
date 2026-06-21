@@ -3,51 +3,91 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Undiscover: Storefront direct pour artistes electro, tracks, EPs et dubpacks</title>
-    <meta name="description" content="Undiscover aide les artistes electro a uploader, partager et vendre tracks, EPs et dubpacks en direct, avec download gates, checkout, analytics et payouts." />
+    <title>Undisc0ver — Storefront direct pour artistes electro : tracks, EPs, dubpacks</title>
+    <meta name="description" content="Undisc0ver aide les artistes electro independants a uploader, partager et vendre tracks, EPs et dubpacks en direct. Download gates, analytics et payouts sans intermediaire." />
     <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
-    <meta name="author" content="Undiscover" />
-    <meta name="application-name" content="Undiscover" />
-    <meta name="keywords" content="Undiscover, artistes electro, vendre musique, tracks, EP, dubpack, download gate, storefront artiste, distribution musicale, electronic music" />
-    <meta name="theme-color" content="#00f08a" />
-    <link rel="canonical" href="https://undisc0ver.com" />
+    <meta name="author" content="Undisc0ver" />
+    <meta name="application-name" content="Undisc0ver" />
+    <meta name="keywords" content="undisc0ver, artistes electro independants, vendre musique electronique, tracks techno, EP tech house, dubpack, download gate, storefront artiste, distribution musicale directe" />
+    <meta name="theme-color" content="#d4e857" />
+
+    <link rel="canonical" href="https://undisc0ver.com/" />
+    <link rel="alternate" hreflang="fr" href="https://undisc0ver.com/" />
+    <link rel="alternate" hreflang="en" href="https://undisc0ver.com/" />
+    <link rel="alternate" hreflang="nl" href="https://undisc0ver.com/" />
+    <link rel="alternate" hreflang="de" href="https://undisc0ver.com/" />
+    <link rel="alternate" hreflang="x-default" href="https://undisc0ver.com/" />
+
     <meta property="og:type" content="website" />
-    <meta property="og:site_name" content="Undiscover" />
-    <meta property="og:title" content="Undiscover: Storefront direct pour artistes electro, tracks, EPs et dubpacks" />
+    <meta property="og:site_name" content="Undisc0ver" />
+    <meta property="og:title" content="Undisc0ver — Storefront direct pour artistes electro" />
     <meta property="og:description" content="Upload, partage et vends tracks, EPs et dubpacks sans intermediaire. Download gates, checkout, analytics et payouts pour artistes independants." />
-    <meta property="og:url" content="https://undisc0ver.com" />
-    <meta property="og:image" content="https://undisc0ver.com/brand/undiscover-icon.png" />
-    <meta property="og:image:alt" content="Logo Undiscover" />
+    <meta property="og:url" content="https://undisc0ver.com/" />
+    <meta property="og:image" content="https://undisc0ver.com/brand/undiscover-og.png" />
+    <meta property="og:image:alt" content="Undisc0ver — Plateforme musicale pour artistes electro" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:locale" content="fr_FR" />
+    <meta property="og:locale:alternate" content="en_US" />
+
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="Undiscover: Storefront direct pour artistes electro" />
-    <meta name="twitter:description" content="Storefront direct, download gates, checkout et analytics pour artistes electro independants." />
-    <meta name="twitter:image" content="https://undisc0ver.com/brand/undiscover-icon.png" />
+    <meta name="twitter:site" content="@undisc0ver" />
+    <meta name="twitter:title" content="Undisc0ver — Storefront direct pour artistes electro" />
+    <meta name="twitter:description" content="Storefront direct, download gates, checkout et analytics pour artistes electro independants. Upload ton prochain drop." />
+    <meta name="twitter:image" content="https://undisc0ver.com/brand/undiscover-og.png" />
+
     <link rel="icon" type="image/png" href="/brand/undiscover-icon.png" />
     <link rel="apple-touch-icon" href="/brand/undiscover-icon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin />
+
     <script id="structured-data" type="application/ld+json">
       {
         "@context": "https://schema.org",
         "@graph": [
           {
             "@type": "Organization",
-            "name": "Undiscover",
-            "url": "https://undisc0ver.com",
-            "logo": "https://undisc0ver.com/brand/undiscover-icon.png",
+            "@id": "https://undisc0ver.com/#organization",
+            "name": "Undisc0ver",
+            "url": "https://undisc0ver.com/",
+            "logo": {
+              "@type": "ImageObject",
+              "url": "https://undisc0ver.com/brand/undiscover-icon.png",
+              "width": 512,
+              "height": 512
+            },
             "email": "hello@undisc0ver.com",
-            "telephone": "087 84 40 00",
             "legalName": "SauroraaSNC",
-            "identifier": "1031.598.463"
+            "identifier": "1031.598.463",
+            "sameAs": [
+              "https://www.instagram.com/undisc0ver",
+              "https://twitter.com/undisc0ver"
+            ]
           },
           {
             "@type": "WebSite",
-            "name": "Undiscover",
-            "url": "https://undisc0ver.com",
-            "description": "Storefront direct pour artistes electro, tracks, EPs et dubpacks.",
+            "@id": "https://undisc0ver.com/#website",
+            "name": "Undisc0ver",
+            "url": "https://undisc0ver.com/",
+            "publisher": { "@id": "https://undisc0ver.com/#organization" },
+            "description": "Storefront direct pour artistes electro independants. Tracks, EPs et dubpacks.",
+            "inLanguage": ["fr-FR", "en-US", "nl-NL", "de-DE"],
             "potentialAction": {
               "@type": "SearchAction",
-              "target": "https://undisc0ver.com/explore?q={search_term_string}",
+              "target": {
+                "@type": "EntryPoint",
+                "urlTemplate": "https://undisc0ver.com/explore?q={search_term_string}"
+              },
               "query-input": "required name=search_term_string"
             }
+          },
+          {
+            "@type": "MusicStore",
+            "@id": "https://undisc0ver.com/#store",
+            "name": "Undisc0ver",
+            "url": "https://undisc0ver.com/",
+            "description": "Plateforme de vente directe de musique electronique independante. Tracks, EPs, dubpacks.",
+            "priceRange": "€0 - €30",
+            "currenciesAccepted": "EUR"
           }
         ]
       }

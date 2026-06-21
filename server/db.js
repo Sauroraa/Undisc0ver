@@ -1,7 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { randomUUID, pbkdf2Sync, randomBytes } from "node:crypto";
+import { randomUUID, pbkdf2Sync, randomBytes, timingSafeEqual } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -31,9 +31,11 @@ export function hashPassword(password) {
 }
 
 export function verifyPassword(password, stored) {
+  if (!stored || !stored.includes(":")) return false;
   const [salt, hash] = stored.split(":");
   const test = pbkdf2Sync(password, salt, 120000, 32, "sha256").toString("hex");
-  return test === hash;
+  if (test.length !== hash.length) return false;
+  return timingSafeEqual(Buffer.from(test, "utf8"), Buffer.from(hash, "utf8"));
 }
 
 export function initDb() {
@@ -195,6 +197,90 @@ export function initDb() {
       status TEXT NOT NULL DEFAULT 'new',
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
+    CREATE TABLE IF NOT EXISTS password_resets (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      token_hash TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      used INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS playlists (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      title TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      visibility TEXT NOT NULL DEFAULT 'public',
+      cover_url TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS playlist_tracks (
+      playlist_id TEXT NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
+      release_id TEXT NOT NULL REFERENCES releases(id) ON DELETE CASCADE,
+      position INTEGER NOT NULL DEFAULT 0,
+      added_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (playlist_id, release_id)
+    );
+    CREATE TABLE IF NOT EXISTS reposts (
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      release_id TEXT NOT NULL REFERENCES releases(id) ON DELETE CASCADE,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (user_id, release_id)
+    );
+    CREATE TABLE IF NOT EXISTS notifications (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      type TEXT NOT NULL,
+      actor_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      release_id TEXT REFERENCES releases(id) ON DELETE CASCADE,
+      body TEXT NOT NULL DEFAULT '',
+      read INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS booking_requests (
+      id TEXT PRIMARY KEY,
+      artist_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      requester_name TEXT NOT NULL,
+      requester_email TEXT NOT NULL,
+      event_date TEXT NOT NULL DEFAULT '',
+      event_type TEXT NOT NULL DEFAULT '',
+      message TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'pending',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS stripe_checkouts (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      release_id TEXT REFERENCES releases(id) ON DELETE SET NULL,
+      stripe_session_id TEXT NOT NULL UNIQUE,
+      amount_cents INTEGER NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_releases_moderation_visibility ON releases (moderation_status, visibility);
+    CREATE INDEX IF NOT EXISTS idx_releases_user_id ON releases (user_id);
+    CREATE INDEX IF NOT EXISTS idx_releases_genre ON releases (genre);
+    CREATE INDEX IF NOT EXISTS idx_releases_plays ON releases (plays DESC);
+    CREATE INDEX IF NOT EXISTS idx_releases_created_at ON releases (created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions (user_id);
+    CREATE INDEX IF NOT EXISTS idx_follows_artist_id ON follows (artist_id);
+    CREATE INDEX IF NOT EXISTS idx_follows_follower_id ON follows (follower_id);
+    CREATE INDEX IF NOT EXISTS idx_likes_release_id ON likes (release_id);
+    CREATE INDEX IF NOT EXISTS idx_release_listens_user_id ON release_listens (user_id);
+    CREATE INDEX IF NOT EXISTS idx_release_listens_release_id ON release_listens (release_id);
+    CREATE INDEX IF NOT EXISTS idx_release_comments_release_id ON release_comments (release_id);
+    CREATE INDEX IF NOT EXISTS idx_promotion_campaigns_status ON promotion_campaigns (status, ends_at);
+    CREATE INDEX IF NOT EXISTS idx_users_artist_slug ON users (artist_slug);
+    CREATE INDEX IF NOT EXISTS idx_users_google_id ON users (google_id);
+    CREATE INDEX IF NOT EXISTS idx_playlists_user_id ON playlists (user_id);
+    CREATE INDEX IF NOT EXISTS idx_playlist_tracks_playlist ON playlist_tracks (playlist_id, position);
+    CREATE INDEX IF NOT EXISTS idx_reposts_release_id ON reposts (release_id);
+    CREATE INDEX IF NOT EXISTS idx_reposts_user_id ON reposts (user_id);
+    CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications (user_id, read, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_password_resets_user_id ON password_resets (user_id);
   `);
 
   const userColumns = db.prepare("PRAGMA table_info(users)").all().map((column) => column.name);

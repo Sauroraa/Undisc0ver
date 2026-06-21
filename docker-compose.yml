@@ -20,39 +20,24 @@ services:
       ADMIN_NAME: ${ADMIN_NAME:-Undiscover Admin}
       PUBLIC_SITE_URL: ${PUBLIC_SITE_URL:-https://undisc0ver.com}
       AUTH_STATE_SECRET: ${AUTH_STATE_SECRET:-}
+      AUDIO_TOKEN_SECRET: ${AUDIO_TOKEN_SECRET:-}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
       GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-https://undisc0ver.com/api/auth/google/callback}
-      COPYRIGHT_SCAN_PROVIDER: ${COPYRIGHT_SCAN_PROVIDER:-off}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      STRIPE_PRICE_PRO: ${STRIPE_PRICE_PRO:-}
+      STRIPE_PRICE_LABEL: ${STRIPE_PRICE_LABEL:-}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      EMAIL_FROM: ${EMAIL_FROM:-Undisc0ver <noreply@undisc0ver.com>}
+      COPYRIGHT_SCAN_PROVIDER: ${COPYRIGHT_SCAN_PROVIDER:-manual}
       COPYRIGHT_TAKEDOWN_EMAIL: ${COPYRIGHT_TAKEDOWN_EMAIL:-copyright@undisc0ver.com}
       COPYRIGHT_BLOCK_THRESHOLD: ${COPYRIGHT_BLOCK_THRESHOLD:-80}
       COPYRIGHT_REVIEW_THRESHOLD: ${COPYRIGHT_REVIEW_THRESHOLD:-45}
-      DATABASE_URL: mysql://${MARIADB_USER:-undiscover}:${MARIADB_PASSWORD:-change_me}@mariadb:3306/${MARIADB_DATABASE:-undiscover}
-    depends_on:
-      mariadb:
-        condition: service_healthy
     ports:
       - "127.0.0.1:3001:3001"
     volumes:
       - undiscover_data:/data
 
-  mariadb:
-    image: mariadb:11.4
-    container_name: undiscover-mariadb
-    restart: unless-stopped
-    environment:
-      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD:-change_root_me}
-      MARIADB_DATABASE: ${MARIADB_DATABASE:-undiscover}
-      MARIADB_USER: ${MARIADB_USER:-undiscover}
-      MARIADB_PASSWORD: ${MARIADB_PASSWORD:-change_me}
-    healthcheck:
-      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-    volumes:
-      - mariadb_data:/var/lib/mysql
-
 volumes:
   undiscover_data:
-  mariadb_data:

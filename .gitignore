@@ -3,6 +3,11 @@ dist/
 .env
 server/*.db
 server/*.db-*
+*.db
+*.db-shm
+*.db-wal
 artifacts/
 npm-debug.log*
 .DS_Store
+360_F_*.jpg
+360_F_*.jpeg

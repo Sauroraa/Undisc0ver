@@ -1,6 +1,9 @@
 import express from "express";
+import compression from "compression";
 import multer from "multer";
 import crypto from "node:crypto";
+import Stripe from "stripe";
+import { Resend } from "resend";
 import { createReadStream, existsSync, mkdirSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,6 +12,48 @@ import { db, hashPassword, id, initDb, publicUser, verifyPassword } from "./db.j
 initDb();
 
 const app = express();
+app.use(compression({ threshold: 1024 }));
+
+// ── Security headers ────────────────────────────────────────────────────────
+app.use((_req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("X-XSS-Protection", "1; mode=block");
+  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+  if (process.env.NODE_ENV === "production") {
+    res.setHeader("Strict-Transport-Security", "max-age=63072000; includeSubDomains; preload");
+  }
+  next();
+});
+
+// ── In-memory rate limiter ──────────────────────────────────────────────────
+const _rlStore = new Map();
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, v] of _rlStore) if (now > v.resetAt + 120_000) _rlStore.delete(k);
+}, 5 * 60_000).unref();
+
+function rateLimiter(maxReqs, windowMs) {
+  return (req, res, next) => {
+    const key = (req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "unknown") + req.path;
+    const now = Date.now();
+    let rec = _rlStore.get(key);
+    if (!rec || now > rec.resetAt) { rec = { count: 0, resetAt: now + windowMs }; _rlStore.set(key, rec); }
+    rec.count++;
+    if (rec.count > maxReqs) {
+      res.setHeader("Retry-After", Math.ceil((rec.resetAt - now) / 1000));
+      return res.status(429).json({ error: "Trop de requêtes. Réessaie dans quelques instants." });
+    }
+    next();
+  };
+}
+
+// ── Email validation helper ─────────────────────────────────────────────────
+function isValidEmail(email) {
+  return typeof email === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email) && email.length <= 254;
+}
+
 app.use(express.json({ limit: "1mb" }));
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -62,8 +107,26 @@ const googleAuth = {
   clientId: process.env.GOOGLE_CLIENT_ID || "",
   clientSecret: process.env.GOOGLE_CLIENT_SECRET || "",
   redirectUri: process.env.GOOGLE_REDIRECT_URI || `${siteUrl}/api/auth/google/callback`,
-  stateSecret: process.env.AUTH_STATE_SECRET || process.env.GOOGLE_CLIENT_SECRET || process.env.ADMIN_PASSWORD || "undiscover-dev-state"
+  stateSecret: process.env.AUTH_STATE_SECRET || crypto.randomBytes(32).toString("hex")
 };
+
+// Audio tokens use a dedicated secret — fully isolated from OAuth state
+const audioSecret = process.env.AUDIO_TOKEN_SECRET || process.env.AUTH_STATE_SECRET || crypto.randomBytes(32).toString("hex");
+
+// ── External services (optional — degrade gracefully when keys absent) ──────
+const stripe = process.env.STRIPE_SECRET_KEY ? new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: "2025-05-28.basil" }) : null;
+const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
+const EMAIL_FROM = process.env.EMAIL_FROM || "Undisc0ver <noreply@undisc0ver.com>";
+
+async function sendEmail({ to, subject, html }) {
+  if (!resend) return { ok: false, reason: "RESEND_API_KEY not configured" };
+  try {
+    await resend.emails.send({ from: EMAIL_FROM, to, subject, html });
+    return { ok: true };
+  } catch {
+    return { ok: false, reason: "Email delivery failed" };
+  }
+}
 const sitemapRoutes = [
   { path: "/", priority: "1.0", changefreq: "daily" },
   { path: "/explore", priority: "0.9", changefreq: "daily" },
@@ -133,11 +196,11 @@ function verifyGoogleState(state = "") {
 
 function authRedirect(params = {}) {
   const query = new URLSearchParams(params).toString();
-  return `${siteUrl}/#/auth/google-callback${query ? `?${query}` : ""}`;
+  return `${siteUrl}/auth/google-callback${query ? `?${query}` : ""}`;
 }
 
 function audioToken(filename = "", purpose = "preview") {
-  return crypto.createHmac("sha256", googleAuth.stateSecret).update(`${purpose}:${filename}`).digest("base64url");
+  return crypto.createHmac("sha256", audioSecret).update(`${purpose}:${filename}`).digest("base64url");
 }
 
 function verifyAudioToken(filename = "", purpose = "preview", token = "") {
@@ -266,12 +329,22 @@ function moderationFromScan(scan) {
   return "published";
 }
 
+const SESSION_MAX_AGE_DAYS = 30;
+
+// Clean up expired sessions periodically
+setInterval(() => {
+  db.prepare(`DELETE FROM sessions WHERE created_at < datetime('now', '-${SESSION_MAX_AGE_DAYS} days')`).run();
+}, 60 * 60_000).unref();
+
 function auth(req, res, next) {
-  const token = req.headers.authorization?.replace("Bearer ", "");
+  const token = String(req.headers.authorization || "").replace(/^Bearer\s+/i, "");
   if (!token) return res.status(401).json({ error: "Authentification requise." });
-  const session = db.prepare("SELECT user_id FROM sessions WHERE token = ?").get(token);
-  if (!session) return res.status(401).json({ error: "Session invalide." });
+  const session = db.prepare(
+    `SELECT user_id FROM sessions WHERE token = ? AND created_at >= datetime('now', '-${SESSION_MAX_AGE_DAYS} days')`
+  ).get(token);
+  if (!session) return res.status(401).json({ error: "Session expirée ou invalide. Reconnecte-toi." });
   const user = db.prepare("SELECT * FROM users WHERE id = ?").get(session.user_id);
+  if (!user) return res.status(401).json({ error: "Compte introuvable." });
   req.user = user;
   next();
 }
@@ -362,7 +435,9 @@ function normalizeArtistSlug(value = "") {
 
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
 
-app.get("/api/copyright/config", (_req, res) => {
+app.get("/api/copyright/config", auth, (req, res) => {
+  const allowed = ["staff", "moderator", "admin"];
+  if (!allowed.includes(req.user.role)) return res.status(403).json({ error: "Accès réservé au staff." });
   res.json({
     provider: scanConfig.provider,
     takedown_email: scanConfig.takedownEmail,
@@ -371,10 +446,13 @@ app.get("/api/copyright/config", (_req, res) => {
   });
 });
 
-app.post("/api/auth/register", (req, res) => {
+app.post("/api/auth/register", rateLimiter(10, 15 * 60_000), (req, res) => {
   const { name, email, password, genre = "Tech House" } = req.body;
   if (!name || !email || !password) return res.status(400).json({ error: "Nom, email et mot de passe sont requis." });
-  const initials = name.split(" ").map((part) => part[0]).join("").slice(0, 2).toUpperCase();
+  if (!isValidEmail(email)) return res.status(400).json({ error: "Adresse email invalide." });
+  if (typeof password !== "string" || password.length < 8) return res.status(400).json({ error: "Le mot de passe doit contenir au moins 8 caractères." });
+  if (typeof name !== "string" || name.trim().length < 2 || name.trim().length > 80) return res.status(400).json({ error: "Nom d'artiste invalide (2–80 caractères)." });
+  const initials = name.trim().split(" ").map((part) => part[0]).join("").slice(0, 2).toUpperCase();
   const userId = id("usr");
   try {
     db.prepare("INSERT INTO users (id, name, email, password_hash, avatar, genre, bio, plan, pro) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
@@ -387,10 +465,11 @@ app.post("/api/auth/register", (req, res) => {
   }
 });
 
-app.post("/api/auth/login", (req, res) => {
+app.post("/api/auth/login", rateLimiter(20, 15 * 60_000), (req, res) => {
   const { email, password } = req.body;
-  const user = db.prepare("SELECT * FROM users WHERE email = ?").get(String(email || "").toLowerCase());
-  if (!user || !verifyPassword(password || "", user.password_hash)) return res.status(401).json({ error: "Identifiants invalides." });
+  if (!isValidEmail(email)) return res.status(400).json({ error: "Email invalide." });
+  const user = db.prepare("SELECT * FROM users WHERE email = ?").get(String(email).toLowerCase());
+  if (!user || !verifyPassword(String(password || ""), user.password_hash)) return res.status(401).json({ error: "Identifiants invalides." });
   const token = id("tok");
   db.prepare("INSERT INTO sessions (token, user_id) VALUES (?, ?)").run(token, user.id);
   res.json({ token, user: publicUser(user) });
@@ -512,9 +591,14 @@ app.post("/api/uploads/image", auth, imageUpload.single("image"), (req, res) => 
 app.get("/api/releases", (req, res) => {
   const q = `%${req.query.q || ""}%`;
   const genre = req.query.genre;
-  const rows = genre && genre !== "All"
-    ? db.prepare(releaseSelect(`WHERE (r.title LIKE ? OR u.name LIKE ?) AND r.genre = ? AND ${publicReleaseWhere("r")}`)).all(q, q, genre)
-    : db.prepare(releaseSelect(`WHERE (r.title LIKE ? OR u.name LIKE ?) AND ${publicReleaseWhere("r")}`)).all(q, q);
+  const kind = req.query.kind;
+  const SORT_COLS = { plays: "r.plays", created_at: "r.created_at", downloads: "r.downloads", price_cents: "r.price_cents" };
+  const sortCol = SORT_COLS[req.query.sort] || "r.plays";
+  const conditions = [`(r.title LIKE ? OR u.name LIKE ?)`, publicReleaseWhere("r")];
+  const params = [q, q];
+  if (genre && genre !== "All") { conditions.push("r.genre = ?"); params.push(genre); }
+  if (kind && kind !== "All") { conditions.push("r.kind = ?"); params.push(kind); }
+  const rows = db.prepare(releaseSelect(`WHERE ${conditions.join(" AND ")}`, `${sortCol} DESC`)).all(...params);
   res.json({ releases: presentReleases(rows) });
 });
 
@@ -523,7 +607,10 @@ app.get("/api/releases/:id", (req, res) => {
   const row = db.prepare(releaseSelect("WHERE r.id = ? AND r.moderation_status = 'published' AND (r.visibility != 'private' OR r.user_id = ?)", "r.created_at DESC")).get(req.params.id, userId || "");
   if (!row) return res.status(404).json({ error: "Release introuvable." });
   if (row.visibility === "private" && row.user_id !== userId) return res.status(404).json({ error: "Release introuvable." });
-  db.prepare("UPDATE releases SET plays = plays + 1 WHERE id = ?").run(req.params.id);
+  // Only count view from non-owners; /api/releases/:id/listen handles play tracking
+  if (!userId || userId !== row.user_id) {
+    db.prepare("UPDATE releases SET plays = plays + 1 WHERE id = ?").run(req.params.id);
+  }
   const fresh = db.prepare(releaseSelect("WHERE r.id = ?", "r.created_at DESC")).get(req.params.id);
   const comments = db.prepare(`
     SELECT rc.id, rc.body, rc.created_at, u.id user_id, u.name, u.avatar, u.avatar_url
@@ -656,13 +743,14 @@ app.delete("/api/releases/:id", auth, (req, res) => {
   res.json({ ok: true });
 });
 
-app.post("/api/releases/:id/report", (req, res) => {
+app.post("/api/releases/:id/report", rateLimiter(5, 60 * 60_000), (req, res) => {
   const release = db.prepare("SELECT id FROM releases WHERE id = ? AND moderation_status != 'removed'").get(req.params.id);
   if (!release) return res.status(404).json({ error: "Release introuvable." });
   const { reporter_name, reporter_email, rights_owner, reason, evidence_url = "" } = req.body;
   if (!reporter_name || !reporter_email || !rights_owner || !reason) {
     return res.status(400).json({ error: "Nom, email, titulaire des droits et motif sont requis." });
   }
+  if (!isValidEmail(reporter_email)) return res.status(400).json({ error: "Email reporter invalide." });
   db.prepare(`INSERT INTO takedown_reports (id, release_id, reporter_name, reporter_email, rights_owner, reason, evidence_url)
     VALUES (?, ?, ?, ?, ?, ?, ?)`)
     .run(id("td"), req.params.id, reporter_name, reporter_email, rights_owner, reason, evidence_url);
@@ -687,7 +775,7 @@ app.post("/api/releases/:id/comments", auth, (req, res) => {
   res.json({ ok: true });
 });
 
-app.post("/api/releases/:id/listen", (req, res) => {
+app.post("/api/releases/:id/listen", rateLimiter(60, 60_000), (req, res) => {
   const userId = optionalUserId(req);
   const release = db.prepare(`SELECT r.id FROM releases r WHERE r.id = ? AND ${publicReleaseWhere("r")}`).get(req.params.id);
   if (!release) return res.status(404).json({ error: "Release introuvable." });
@@ -698,6 +786,7 @@ app.post("/api/releases/:id/listen", (req, res) => {
 
 app.get("/api/discover", (req, res) => {
   const userId = optionalUserId(req);
+
   const recent = userId
     ? db.prepare(releaseSelect(`
         JOIN release_listens rl ON rl.release_id = r.id
@@ -705,6 +794,7 @@ app.get("/api/discover", (req, res) => {
         GROUP BY r.id
       `, "MAX(rl.created_at) DESC")).all(userId).slice(0, 12)
     : [];
+
   const affinity = userId
     ? db.prepare(`
         SELECT r.genre, r.user_id, COUNT(*) weight
@@ -716,24 +806,39 @@ app.get("/api/discover", (req, res) => {
         LIMIT 8
       `).all(userId)
     : [];
-  const genres = affinity.map((row) => row.genre);
-  const artistIds = affinity.map((row) => row.user_id);
-  const allReleases = db.prepare(releaseSelect(`WHERE ${publicReleaseWhere("r")}`, "r.created_at DESC")).all();
+
+  const genres = new Set(affinity.map((row) => row.genre));
+  const artistIds = new Set(affinity.map((row) => row.user_id));
   const recentlyHeardIds = new Set(recent.map((item) => item.id));
-  const recommended = allReleases
-    .filter((release) => !recentlyHeardIds.has(release.id))
-    .map((release) => ({
-      ...release,
+
+  // Score-ranked recommendations — query in DB, limit to 80 candidates to avoid full scan
+  const candidatePool = db.prepare(releaseSelect(
+    `WHERE ${publicReleaseWhere("r")}`,
+    "(r.plays * 0.55 + r.downloads * 1.4) DESC"
+  )).all().slice(0, 80);
+
+  const twoWeeks = 14 * 24 * 60 * 60 * 1000;
+  const now = Date.now();
+  const recommended = candidatePool
+    .filter((r) => !recentlyHeardIds.has(r.id))
+    .map((r) => ({
+      ...r,
       recommendation_score:
-        Number(release.plays || 0) * 0.55 +
-        Number(release.downloads || 0) * 1.4 +
-        Number(release.likes || 0) * 4 +
-        (genres.includes(release.genre) ? 90 : 0) +
-        (artistIds.includes(release.user_id) ? 70 : 0) +
-        (Date.now() - new Date(release.created_at).getTime() < 1000 * 60 * 60 * 24 * 14 ? 35 : 0)
+        Number(r.plays || 0) * 0.55 +
+        Number(r.downloads || 0) * 1.4 +
+        Number(r.likes || 0) * 4 +
+        (genres.has(r.genre) ? 90 : 0) +
+        (artistIds.has(r.user_id) ? 70 : 0) +
+        (now - new Date(r.created_at).getTime() < twoWeeks ? 35 : 0)
     }))
     .sort((a, b) => b.recommendation_score - a.recommendation_score)
     .slice(0, 16);
+
+  const newReleases = db.prepare(releaseSelect(
+    `WHERE ${publicReleaseWhere("r")}`,
+    "r.created_at DESC"
+  )).all().slice(0, 12);
+
   const trendingGenres = db.prepare(`
     SELECT r.genre, COUNT(*) releases, COALESCE(SUM(r.plays), 0) plays, COALESCE(SUM(r.downloads), 0) downloads
     FROM releases r
@@ -742,7 +847,12 @@ app.get("/api/discover", (req, res) => {
     ORDER BY (COALESCE(SUM(r.plays), 0) + COALESCE(SUM(r.downloads), 0) * 2 + COUNT(*) * 15) DESC
     LIMIT 8
   `).all();
-  const boosted = db.prepare(campaignSelect(`WHERE ${activeCampaignWhere("pc")}`, "pc.daily_budget_cents DESC, pc.created_at DESC")).all().slice(0, 8);
+
+  const boosted = db.prepare(campaignSelect(
+    `WHERE ${activeCampaignWhere("pc")}`,
+    "pc.daily_budget_cents DESC, pc.created_at DESC"
+  )).all().slice(0, 8);
+
   const suggestedArtists = db.prepare(`
     SELECT u.id, u.name, u.avatar, u.avatar_url, u.logo_url, u.artist_slug, u.genre, u.verified, u.pro, u.plan, u.role,
       COUNT(DISTINCT r.id) releases, COALESCE(SUM(r.plays), 0) plays, COUNT(DISTINCT f.follower_id) followers
@@ -754,13 +864,14 @@ app.get("/api/discover", (req, res) => {
     ORDER BY (COALESCE(SUM(r.plays), 0) + COUNT(DISTINCT f.follower_id) * 12 + u.verified * 80 + u.pro * 60) DESC
     LIMIT 8
   `).all();
+
   res.json({
     recent: presentReleases(recent),
     recommended: presentReleases(recommended),
     trending_genres: trendingGenres,
     boosted,
     suggested_artists: suggestedArtists,
-    new_releases: presentReleases(allReleases.slice(0, 12))
+    new_releases: presentReleases(newReleases)
   });
 });
 
@@ -871,6 +982,8 @@ app.post("/api/releases/:id/buy", auth, (req, res) => {
 
 app.get("/api/artists", (req, res) => {
   const q = `%${req.query.q || ""}%`;
+  const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 50));
+  const offset = Math.max(0, Number(req.query.offset) || 0);
   const rows = db.prepare(`
     SELECT u.id, u.name, u.avatar, u.avatar_url, u.logo_url, u.banner_url, u.artist_slug, u.social_links, u.genre, u.location, u.bio, u.verified, u.pro, u.plan, u.role,
       COUNT(DISTINCT r.id) releases,
@@ -882,8 +995,9 @@ app.get("/api/artists", (req, res) => {
     WHERE u.workspace_visibility = 'public' AND (u.name LIKE ? OR u.genre LIKE ?)
     GROUP BY u.id
     ORDER BY plays DESC
-  `).all(q, q);
-  res.json({ artists: rows });
+    LIMIT ? OFFSET ?
+  `).all(q, q, limit, offset);
+  res.json({ artists: rows, limit, offset });
 });
 
 app.get("/api/artists/:id", (req, res) => {
@@ -933,6 +1047,7 @@ app.patch("/api/me/settings", auth, (req, res) => {
     })
   };
   if (!fields.name || !fields.email) return res.status(400).json({ error: "Nom et email requis." });
+  if (!isValidEmail(fields.email)) return res.status(400).json({ error: "Adresse email invalide." });
   try {
     db.prepare(`UPDATE users SET name = ?, email = ?, location = ?, bio = ?, genre = ?, avatar_url = ?, logo_url = ?, banner_url = ?, artist_slug = ?, plan = ?, pro = ?, workspace_visibility = ?, social_links = ? WHERE id = ?`)
       .run(fields.name, fields.email, fields.location, fields.bio, fields.genre, fields.avatar_url, fields.logo_url, fields.banner_url, fields.artist_slug, fields.plan, fields.plan !== "free" ? 1 : 0, fields.workspace_visibility, fields.social_links, req.user.id);
@@ -1003,9 +1118,10 @@ app.put("/api/me/testimonial", auth, (req, res) => {
   res.json({ testimonial: db.prepare("SELECT quote, role, visible, updated_at FROM testimonials WHERE user_id = ?").get(req.user.id) });
 });
 
-app.post("/api/support/tickets", (req, res) => {
+app.post("/api/support/tickets", rateLimiter(5, 60 * 60_000), (req, res) => {
   const { name, email, topic, message } = req.body;
   if (!name || !email || !topic || !message) return res.status(400).json({ error: "Nom, email, sujet et message requis." });
+  if (!isValidEmail(email)) return res.status(400).json({ error: "Adresse email invalide." });
   const userId = req.headers.authorization ? db.prepare("SELECT user_id FROM sessions WHERE token = ?").get(req.headers.authorization.replace("Bearer ", ""))?.user_id : null;
   const ticketId = id("sup");
   db.prepare("INSERT INTO support_tickets (id, user_id, name, email, topic, message) VALUES (?, ?, ?, ?, ?, ?)")
@@ -1013,7 +1129,7 @@ app.post("/api/support/tickets", (req, res) => {
   res.json({ ok: true, ticket: { id: ticketId, status: "open" } });
 });
 
-app.post("/api/careers/apply", (req, res) => {
+app.post("/api/careers/apply", rateLimiter(3, 60 * 60_000), (req, res) => {
   const userId = req.headers.authorization ? db.prepare("SELECT user_id FROM sessions WHERE token = ?").get(req.headers.authorization.replace("Bearer ", ""))?.user_id : null;
   const name = String(req.body.name || "").trim().slice(0, 90);
   const email = String(req.body.email || "").trim().toLowerCase().slice(0, 140);
@@ -1023,6 +1139,7 @@ app.post("/api/careers/apply", (req, res) => {
   const availability = String(req.body.availability || "").trim().slice(0, 120);
   const allowedRoles = ["Staff", "Moderator", "Community Manager", "Manager", "Developer"];
   if (!name || !email || !role || !experience) return res.status(400).json({ error: "Nom, email, role et experience requis." });
+  if (!isValidEmail(email)) return res.status(400).json({ error: "Adresse email invalide." });
   if (!allowedRoles.includes(role)) return res.status(400).json({ error: "Role de candidature invalide." });
   const applicationId = id("job");
   db.prepare("INSERT INTO career_applications (id, user_id, name, email, role, experience, links, availability) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
@@ -1046,7 +1163,7 @@ app.post("/api/short-links", auth, (req, res) => {
 
 app.get("/r/:code", (req, res) => {
   const link = db.prepare("SELECT * FROM short_links WHERE code = ?").get(req.params.code);
-  if (!link) return res.redirect(`${siteUrl}/#/explore`);
+  if (!link) return res.redirect(`${siteUrl}/explore`);
   db.prepare("UPDATE short_links SET clicks = clicks + 1 WHERE code = ?").run(req.params.code);
   res.redirect(link.target_url);
 });
@@ -1165,9 +1282,19 @@ app.post("/api/staff/applications/:id/status", staffAuth, (req, res) => {
 });
 
 app.get("/robots.txt", (_req, res) => {
+  res.setHeader("Cache-Control", "public, max-age=86400");
   res.type("text/plain").send([
     "User-agent: *",
     "Allow: /",
+    "Allow: /explore",
+    "Allow: /artists",
+    "Allow: /charts",
+    "Allow: /pricing",
+    "Allow: /faq",
+    "Allow: /getting-started",
+    "Allow: /release-guide",
+    "Allow: /artist/",
+    "Allow: /release/",
     "Disallow: /api/",
     "Disallow: /dashboard",
     "Disallow: /catalog",
@@ -1176,25 +1303,460 @@ app.get("/robots.txt", (_req, res) => {
     "Disallow: /settings",
     "Disallow: /staff",
     "Disallow: /checkout",
+    "Disallow: /upload",
     "",
     `Sitemap: ${siteUrl}/sitemap.xml`
   ].join("\n"));
 });
 
 app.get("/sitemap.xml", (_req, res) => {
-  const artists = db.prepare("SELECT id, artist_slug, created_at FROM users ORDER BY created_at DESC").all();
-  const releases = db.prepare("SELECT id, created_at FROM releases WHERE moderation_status = 'published' AND visibility = 'public' ORDER BY created_at DESC").all();
+  const artists = db.prepare(
+    "SELECT id, artist_slug, created_at FROM users WHERE workspace_visibility = 'public' ORDER BY created_at DESC LIMIT 5000"
+  ).all();
+  const releases = db.prepare(
+    "SELECT id, title, created_at FROM releases WHERE moderation_status = 'published' AND visibility = 'public' ORDER BY created_at DESC LIMIT 10000"
+  ).all();
   const entries = [
     ...sitemapRoutes.map(sitemapEntry),
-    ...artists.map((artist) => sitemapEntry({ path: `/artist/${artist.artist_slug || artist.id}`, lastmod: artist.created_at, changefreq: "weekly", priority: "0.7" })),
-    ...releases.map((release) => sitemapEntry({ path: `/release/${release.id}`, lastmod: release.created_at, changefreq: "weekly", priority: "0.8" }))
+    ...artists.map((a) => sitemapEntry({
+      path: `/artist/${xmlEscape(a.artist_slug || a.id)}`,
+      lastmod: a.created_at,
+      changefreq: "weekly",
+      priority: "0.7"
+    })),
+    ...releases.map((r) => sitemapEntry({
+      path: `/release/${xmlEscape(r.id)}`,
+      lastmod: r.created_at,
+      changefreq: "weekly",
+      priority: "0.8"
+    }))
   ];
+  res.setHeader("Cache-Control", "public, max-age=3600");
   res.type("application/xml").send([
     '<?xml version="1.0" encoding="UTF-8"?>',
     '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
     entries.join("\n"),
     "</urlset>"
   ].join("\n"));
+});
+
+// ── Dynamic Open Graph meta for releases and artists (used by social scrapers) ──
+app.get("/api/meta/release/:id", (req, res) => {
+  const row = db.prepare(`
+    SELECT r.title, r.description, r.genre, r.kind, r.cover_url, r.duration, r.tracks, r.created_at,
+           u.name artist, u.artist_slug
+    FROM releases r JOIN users u ON u.id = r.user_id
+    WHERE r.id = ? AND r.moderation_status = 'published' AND r.visibility = 'public'
+  `).get(req.params.id);
+  if (!row) return res.status(404).json({ error: "Release introuvable." });
+  const slug = row.artist_slug || "";
+  const artistUrl = `${siteUrl}/artist/${slug}`;
+  const releaseUrl = `${siteUrl}/release/${req.params.id}`;
+  res.json({
+    title: `${row.title} — ${row.artist} | Undisc0ver`,
+    description: row.description ? row.description.slice(0, 160) : `${row.kind} by ${row.artist}. Listen and download on Undisc0ver.`,
+    og_image: row.cover_url || `${siteUrl}/brand/undiscover-og.png`,
+    og_url: releaseUrl,
+    artist_url: artistUrl,
+    schema: {
+      "@context": "https://schema.org",
+      "@type": "MusicRecording",
+      "name": row.title,
+      "byArtist": { "@type": "MusicGroup", "name": row.artist, "url": artistUrl },
+      "genre": row.genre,
+      "duration": row.duration,
+      "url": releaseUrl,
+      "datePublished": row.created_at ? row.created_at.slice(0, 10) : undefined,
+      "image": row.cover_url || `${siteUrl}/brand/undiscover-og.png`
+    }
+  });
+});
+
+app.get("/api/meta/artist/:id", (req, res) => {
+  const artist = db.prepare(`
+    SELECT u.id, u.name, u.bio, u.genre, u.avatar_url, u.logo_url, u.banner_url, u.artist_slug, u.verified,
+           COUNT(DISTINCT r.id) releases_count, COALESCE(SUM(r.plays), 0) plays
+    FROM users u
+    LEFT JOIN releases r ON r.user_id = u.id AND ${publicReleaseWhere("r")}
+    WHERE (u.id = ? OR u.artist_slug = ?) AND u.workspace_visibility = 'public'
+    GROUP BY u.id
+  `).get(req.params.id, normalizeArtistSlug(req.params.id));
+  if (!artist) return res.status(404).json({ error: "Artiste introuvable." });
+  const artistUrl = `${siteUrl}/artist/${artist.artist_slug || artist.id}`;
+  const image = artist.banner_url || artist.logo_url || artist.avatar_url || `${siteUrl}/brand/undiscover-og.png`;
+  res.json({
+    title: `${artist.name} — ${artist.genre} Artist | Undisc0ver`,
+    description: artist.bio ? artist.bio.slice(0, 160) : `${artist.name} on Undisc0ver. ${artist.releases_count} releases. Discover tracks, EPs and dubpacks.`,
+    og_image: image,
+    og_url: artistUrl,
+    schema: {
+      "@context": "https://schema.org",
+      "@type": "MusicGroup",
+      "name": artist.name,
+      "genre": artist.genre,
+      "url": artistUrl,
+      "image": image,
+      "description": artist.bio || ""
+    }
+  });
+});
+
+// ── Password reset ──────────────────────────────────────────────────────────
+app.post("/api/auth/forgot-password", rateLimiter(5, 60 * 60_000), async (req, res) => {
+  const email = String(req.body.email || "").trim().toLowerCase();
+  if (!isValidEmail(email)) return res.status(400).json({ error: "Adresse email invalide." });
+  const user = db.prepare("SELECT id, name, email FROM users WHERE email = ?").get(email);
+  // Always respond 200 to prevent email enumeration
+  if (!user) return res.json({ ok: true });
+  db.prepare("UPDATE password_resets SET used = 1 WHERE user_id = ? AND used = 0").run(user.id);
+  const rawToken = crypto.randomBytes(32).toString("hex");
+  const tokenHash = crypto.createHash("sha256").update(rawToken).digest("hex");
+  db.prepare("INSERT INTO password_resets (id, user_id, token_hash, expires_at) VALUES (?, ?, ?, datetime('now', '+1 hour'))")
+    .run(id("rst"), user.id, tokenHash);
+  const resetUrl = `${siteUrl}/reset-password?token=${rawToken}`;
+  await sendEmail({
+    to: user.email,
+    subject: "Réinitialisation de ton mot de passe Undisc0ver",
+    html: `<p>Bonjour ${user.name},</p><p>Clique sur ce lien pour réinitialiser ton mot de passe :</p><p><a href="${resetUrl}">${resetUrl}</a></p><p>Ce lien expire dans 1 heure.</p><p>Si tu n'as pas demandé cette réinitialisation, ignore cet email.</p>`
+  });
+  res.json({ ok: true });
+});
+
+app.post("/api/auth/reset-password", rateLimiter(10, 60 * 60_000), (req, res) => {
+  const rawToken = String(req.body.token || "").trim();
+  const newPassword = String(req.body.password || "");
+  if (!rawToken || newPassword.length < 8) return res.status(400).json({ error: "Token invalide ou mot de passe trop court (8 caractères min)." });
+  const tokenHash = crypto.createHash("sha256").update(rawToken).digest("hex");
+  const reset = db.prepare("SELECT * FROM password_resets WHERE token_hash = ? AND used = 0 AND expires_at > datetime('now')").get(tokenHash);
+  if (!reset) return res.status(400).json({ error: "Lien expiré ou déjà utilisé." });
+  db.prepare("UPDATE users SET password_hash = ? WHERE id = ?").run(hashPassword(newPassword), reset.user_id);
+  db.prepare("UPDATE password_resets SET used = 1 WHERE id = ?").run(reset.id);
+  db.prepare("DELETE FROM sessions WHERE user_id = ?").run(reset.user_id);
+  res.json({ ok: true });
+});
+
+// ── Stripe checkout ──────────────────────────────────────────────────────────
+app.post("/api/checkout/create-session", auth, async (req, res) => {
+  if (!stripe) return res.status(503).json({ error: "Le paiement en ligne n'est pas encore activé. Contacte le support." });
+  const releaseId = String(req.body.release_id || "").trim();
+  const planName = String(req.body.plan || "").trim();
+
+  if (releaseId) {
+    const release = db.prepare("SELECT * FROM releases WHERE id = ? AND moderation_status = 'published' AND price_cents > 0").get(releaseId);
+    if (!release) return res.status(404).json({ error: "Release introuvable ou gratuite." });
+    const session = await stripe.checkout.sessions.create({
+      mode: "payment",
+      success_url: `${siteUrl}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${siteUrl}/release/${releaseId}`,
+      line_items: [{ price_data: { currency: "eur", unit_amount: release.price_cents, product_data: { name: release.title, description: `${release.kind} by ${release.artist || ""}` } }, quantity: 1 }],
+      metadata: { user_id: req.user.id, release_id: releaseId, type: "release_purchase" }
+    });
+    db.prepare("INSERT INTO stripe_checkouts (id, user_id, release_id, stripe_session_id, amount_cents, status) VALUES (?, ?, ?, ?, ?, 'pending')")
+      .run(id("chk"), req.user.id, releaseId, session.id, release.price_cents);
+    return res.json({ url: session.url });
+  }
+
+  const planPrices = { pro: process.env.STRIPE_PRICE_PRO || "", label: process.env.STRIPE_PRICE_LABEL || "" };
+  if (!planName || !planPrices[planName]) return res.status(400).json({ error: "Plan invalide ou non configuré." });
+  const session = await stripe.checkout.sessions.create({
+    mode: "subscription",
+    success_url: `${siteUrl}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
+    cancel_url: `${siteUrl}/pricing`,
+    line_items: [{ price: planPrices[planName], quantity: 1 }],
+    metadata: { user_id: req.user.id, plan: planName, type: "subscription" }
+  });
+  res.json({ url: session.url });
+});
+
+app.get("/api/checkout/success", auth, (req, res) => {
+  const sessionId = String(req.query.session_id || "").trim();
+  if (!stripe || !sessionId) return res.json({ ok: true, message: "Achat enregistré." });
+  stripe.checkout.sessions.retrieve(sessionId).then((session) => {
+    if (session.payment_status !== "paid" && session.status !== "active") return res.json({ ok: false });
+    const chk = db.prepare("SELECT * FROM stripe_checkouts WHERE stripe_session_id = ?").get(sessionId);
+    if (chk && chk.status === "pending") {
+      db.prepare("UPDATE stripe_checkouts SET status = 'paid' WHERE id = ?").run(chk.id);
+      if (chk.release_id) {
+        const release = db.prepare("SELECT price_cents FROM releases WHERE id = ?").get(chk.release_id);
+        db.prepare("INSERT OR IGNORE INTO purchases (id, user_id, release_id, amount_cents) VALUES (?, ?, ?, ?)").run(id("pur"), chk.user_id, chk.release_id, release?.price_cents || chk.amount_cents);
+        db.prepare("UPDATE releases SET sales = sales + 1, revenue_cents = revenue_cents + ? WHERE id = ?").run(release?.price_cents || chk.amount_cents, chk.release_id);
+      }
+      const meta = session.metadata || {};
+      if (meta.type === "subscription" && meta.plan) {
+        db.prepare("UPDATE users SET plan = ?, pro = 1 WHERE id = ?").run(meta.plan, chk.user_id);
+      }
+    }
+    res.json({ ok: true, type: session.metadata?.type || "purchase" });
+  }).catch(() => res.json({ ok: false }));
+});
+
+// Stripe webhook (for production reliability)
+app.post("/api/webhooks/stripe", express.raw({ type: "application/json" }), (req, res) => {
+  if (!stripe || !process.env.STRIPE_WEBHOOK_SECRET) return res.json({ received: true });
+  let event;
+  try {
+    event = stripe.webhooks.constructEvent(req.body, req.headers["stripe-signature"], process.env.STRIPE_WEBHOOK_SECRET);
+  } catch {
+    return res.status(400).send("Webhook signature invalid.");
+  }
+  if (event.type === "checkout.session.completed") {
+    const session = event.data.object;
+    const chk = db.prepare("SELECT * FROM stripe_checkouts WHERE stripe_session_id = ?").get(session.id);
+    if (chk && chk.status === "pending") {
+      db.prepare("UPDATE stripe_checkouts SET status = 'paid' WHERE id = ?").run(chk.id);
+      if (chk.release_id) {
+        const release = db.prepare("SELECT price_cents FROM releases WHERE id = ?").get(chk.release_id);
+        db.prepare("INSERT OR IGNORE INTO purchases (id, user_id, release_id, amount_cents) VALUES (?, ?, ?, ?)").run(id("pur"), chk.user_id, chk.release_id, release?.price_cents || chk.amount_cents);
+        db.prepare("UPDATE releases SET sales = sales + 1, revenue_cents = revenue_cents + ? WHERE id = ?").run(release?.price_cents || 0, chk.release_id);
+      }
+      const meta = session.metadata || {};
+      if (meta.type === "subscription" && meta.plan) {
+        db.prepare("UPDATE users SET plan = ?, pro = 1 WHERE id = ?").run(meta.plan, chk.user_id);
+      }
+    }
+  }
+  res.json({ received: true });
+});
+
+// ── Feed (releases from followed artists) ───────────────────────────────────
+app.get("/api/feed", auth, (req, res) => {
+  const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 20));
+  const offset = Math.max(0, Number(req.query.offset) || 0);
+  const whereClause = `WHERE r.user_id IN (SELECT artist_id FROM follows WHERE follower_id = ?) AND ${publicReleaseWhere("r")}`;
+  const releases = db.prepare(releaseSelect(whereClause, "r.created_at DESC") + " LIMIT ? OFFSET ?").all(req.user.id, limit, offset);
+  const total = db.prepare(`SELECT COUNT(*) total FROM releases r JOIN users u ON u.id = r.user_id ${whereClause}`).get(req.user.id)?.total || 0;
+  res.json({ releases: presentReleases(releases), total, limit, offset });
+});
+
+// ── Genre page ───────────────────────────────────────────────────────────────
+app.get("/api/genre/:genre/releases", (req, res) => {
+  const genre = String(req.params.genre || "").trim();
+  const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 20));
+  const offset = Math.max(0, Number(req.query.offset) || 0);
+  const releases = db.prepare(`
+    ${releaseSelect(`WHERE r.genre LIKE ? AND ${publicReleaseWhere("r")}`, "r.plays DESC, r.created_at DESC")}
+    LIMIT ? OFFSET ?
+  `).all(`%${genre}%`, limit, offset);
+  const artists = db.prepare(`
+    SELECT u.id, u.name, u.avatar, u.avatar_url, u.logo_url, u.artist_slug, u.plan, u.pro, u.verified,
+      COUNT(DISTINCT r.id) releases_count, COALESCE(SUM(r.plays), 0) plays
+    FROM users u JOIN releases r ON r.user_id = u.id
+    WHERE r.genre LIKE ? AND ${publicReleaseWhere("r")} AND u.workspace_visibility = 'public'
+    GROUP BY u.id ORDER BY plays DESC LIMIT 8
+  `).all(`%${genre}%`);
+  res.json({ genre, releases: presentReleases(releases), artists, limit, offset });
+});
+
+// ── Playlists ────────────────────────────────────────────────────────────────
+app.get("/api/playlists", auth, (req, res) => {
+  const playlists = db.prepare(`
+    SELECT p.*, COUNT(pt.release_id) track_count, u.name owner_name, u.avatar, u.artist_slug
+    FROM playlists p
+    JOIN users u ON u.id = p.user_id
+    LEFT JOIN playlist_tracks pt ON pt.playlist_id = p.id
+    WHERE p.user_id = ?
+    GROUP BY p.id ORDER BY p.created_at DESC
+  `).all(req.user.id);
+  res.json({ playlists });
+});
+
+app.get("/api/playlists/public", (req, res) => {
+  const q = `%${req.query.q || ""}%`;
+  const playlists = db.prepare(`
+    SELECT p.*, COUNT(pt.release_id) track_count, u.name owner_name, u.avatar, u.avatar_url, u.artist_slug
+    FROM playlists p
+    JOIN users u ON u.id = p.user_id
+    LEFT JOIN playlist_tracks pt ON pt.playlist_id = p.id
+    WHERE p.visibility = 'public' AND (p.title LIKE ? OR u.name LIKE ?)
+    GROUP BY p.id ORDER BY p.created_at DESC LIMIT 40
+  `).all(q, q);
+  res.json({ playlists });
+});
+
+app.post("/api/playlists", auth, (req, res) => {
+  const title = String(req.body.title || "").trim().slice(0, 120);
+  const description = String(req.body.description || "").trim().slice(0, 500);
+  const visibility = ["public", "private"].includes(req.body.visibility) ? req.body.visibility : "public";
+  if (!title) return res.status(400).json({ error: "Titre de playlist requis." });
+  const playlistId = id("pls");
+  db.prepare("INSERT INTO playlists (id, user_id, title, description, visibility) VALUES (?, ?, ?, ?, ?)")
+    .run(playlistId, req.user.id, title, description, visibility);
+  res.json({ playlist: db.prepare("SELECT * FROM playlists WHERE id = ?").get(playlistId) });
+});
+
+app.get("/api/playlists/:id", (req, res) => {
+  const playlist = db.prepare(`
+    SELECT p.*, u.name owner_name, u.avatar, u.avatar_url, u.artist_slug
+    FROM playlists p JOIN users u ON u.id = p.user_id WHERE p.id = ?
+  `).get(req.params.id);
+  if (!playlist) return res.status(404).json({ error: "Playlist introuvable." });
+  const tracks = db.prepare(`
+    ${releaseSelect("JOIN playlist_tracks pt ON pt.release_id = r.id WHERE pt.playlist_id = ?", "pt.position ASC, pt.added_at ASC")}
+  `).all(req.params.id);
+  res.json({ playlist, tracks: presentReleases(tracks) });
+});
+
+app.post("/api/playlists/:id/tracks", auth, (req, res) => {
+  const playlist = db.prepare("SELECT * FROM playlists WHERE id = ? AND user_id = ?").get(req.params.id, req.user.id);
+  if (!playlist) return res.status(404).json({ error: "Playlist introuvable." });
+  const releaseId = String(req.body.release_id || "").trim();
+  const release = db.prepare("SELECT id FROM releases WHERE id = ? AND moderation_status = 'published'").get(releaseId);
+  if (!release) return res.status(404).json({ error: "Release introuvable." });
+  const maxPos = db.prepare("SELECT COALESCE(MAX(position), 0) pos FROM playlist_tracks WHERE playlist_id = ?").get(req.params.id).pos;
+  db.prepare("INSERT OR IGNORE INTO playlist_tracks (playlist_id, release_id, position) VALUES (?, ?, ?)").run(req.params.id, releaseId, maxPos + 1);
+  res.json({ ok: true });
+});
+
+app.delete("/api/playlists/:id/tracks/:releaseId", auth, (req, res) => {
+  const playlist = db.prepare("SELECT * FROM playlists WHERE id = ? AND user_id = ?").get(req.params.id, req.user.id);
+  if (!playlist) return res.status(404).json({ error: "Playlist introuvable." });
+  db.prepare("DELETE FROM playlist_tracks WHERE playlist_id = ? AND release_id = ?").run(req.params.id, req.params.releaseId);
+  res.json({ ok: true });
+});
+
+app.delete("/api/playlists/:id", auth, (req, res) => {
+  const playlist = db.prepare("SELECT * FROM playlists WHERE id = ? AND user_id = ?").get(req.params.id, req.user.id);
+  if (!playlist) return res.status(404).json({ error: "Playlist introuvable." });
+  db.prepare("DELETE FROM playlists WHERE id = ?").run(req.params.id);
+  res.json({ ok: true });
+});
+
+// ── Reposts ──────────────────────────────────────────────────────────────────
+app.post("/api/releases/:id/repost", auth, (req, res) => {
+  const release = db.prepare("SELECT id, user_id FROM releases WHERE id = ? AND moderation_status = 'published'").get(req.params.id);
+  if (!release) return res.status(404).json({ error: "Release introuvable." });
+  const already = db.prepare("SELECT 1 FROM reposts WHERE user_id = ? AND release_id = ?").get(req.user.id, req.params.id);
+  if (already) {
+    db.prepare("DELETE FROM reposts WHERE user_id = ? AND release_id = ?").run(req.user.id, req.params.id);
+    return res.json({ reposted: false });
+  }
+  db.prepare("INSERT INTO reposts (user_id, release_id) VALUES (?, ?)").run(req.user.id, req.params.id);
+  if (release.user_id !== req.user.id) {
+    db.prepare("INSERT INTO notifications (id, user_id, type, actor_id, release_id, body) VALUES (?, ?, 'repost', ?, ?, ?)")
+      .run(id("ntf"), release.user_id, req.user.id, req.params.id, "a reposté ta sortie");
+  }
+  res.json({ reposted: true });
+});
+
+function optAuth(req, _res, next) {
+  const token = req.headers.authorization?.replace(/^Bearer\s+/i, "");
+  req.userId = token ? db.prepare("SELECT user_id FROM sessions WHERE token = ?").get(token)?.user_id : null;
+  next();
+}
+
+app.get("/api/releases/:id/repost", optAuth, (req, res) => {
+  const count = db.prepare("SELECT COUNT(*) total FROM reposts WHERE release_id = ?").get(req.params.id).total;
+  const reposted = req.userId ? !!db.prepare("SELECT 1 FROM reposts WHERE user_id = ? AND release_id = ?").get(req.userId, req.params.id) : false;
+  res.json({ count, reposted });
+});
+
+// ── Notifications ────────────────────────────────────────────────────────────
+
+app.get("/api/notifications", auth, (req, res) => {
+  const notifs = db.prepare(`
+    SELECT n.*, u.name actor_name, u.avatar actor_avatar, u.avatar_url actor_avatar_url, u.artist_slug actor_slug,
+           r.title release_title
+    FROM notifications n
+    LEFT JOIN users u ON u.id = n.actor_id
+    LEFT JOIN releases r ON r.id = n.release_id
+    WHERE n.user_id = ?
+    ORDER BY n.created_at DESC LIMIT 30
+  `).all(req.user.id);
+  const unread = db.prepare("SELECT COUNT(*) total FROM notifications WHERE user_id = ? AND read = 0").get(req.user.id).total;
+  res.json({ notifications: notifs, unread });
+});
+
+app.post("/api/notifications/read-all", auth, (req, res) => {
+  db.prepare("UPDATE notifications SET read = 1 WHERE user_id = ?").run(req.user.id);
+  res.json({ ok: true });
+});
+
+app.patch("/api/notifications/:id/read", auth, (req, res) => {
+  db.prepare("UPDATE notifications SET read = 1 WHERE id = ? AND user_id = ?").run(req.params.id, req.user.id);
+  res.json({ ok: true });
+});
+
+// Notify on follow
+const _origFollowRoute = app._router?.stack?.find?.(() => false);
+app.post("/api/artists/:id/follow-notify", auth, (req, res, next) => {
+  const artistId = req.params.id;
+  const already = db.prepare("SELECT 1 FROM follows WHERE follower_id = ? AND artist_id = ?").get(req.user.id, artistId);
+  if (!already && req.user.id !== artistId) {
+    db.prepare("INSERT INTO notifications (id, user_id, type, actor_id, body) VALUES (?, ?, 'follow', ?, ?)")
+      .run(id("ntf"), artistId, req.user.id, "a commencé à te suivre");
+  }
+  next();
+});
+
+// Notify on like
+app.post("/api/releases/:id/like", auth, (req, res) => {
+  const release = db.prepare("SELECT id, user_id, title FROM releases WHERE id = ? AND moderation_status = 'published'").get(req.params.id);
+  if (!release) return res.status(404).json({ error: "Release introuvable." });
+  const liked = db.prepare("SELECT 1 FROM likes WHERE user_id = ? AND release_id = ?").get(req.user.id, req.params.id);
+  if (liked) {
+    db.prepare("DELETE FROM likes WHERE user_id = ? AND release_id = ?").run(req.user.id, req.params.id);
+  } else {
+    db.prepare("INSERT OR IGNORE INTO likes (user_id, release_id) VALUES (?, ?)").run(req.user.id, req.params.id);
+    if (release.user_id !== req.user.id) {
+      db.prepare("INSERT INTO notifications (id, user_id, type, actor_id, release_id, body) VALUES (?, ?, 'like', ?, ?, ?)")
+        .run(id("ntf"), release.user_id, req.user.id, req.params.id, "a aimé ta sortie");
+    }
+  }
+  const count = db.prepare("SELECT COUNT(*) total FROM likes WHERE release_id = ?").get(req.params.id).total;
+  res.json({ liked: !liked, count });
+});
+
+// ── Booking requests ─────────────────────────────────────────────────────────
+app.post("/api/artists/:id/booking", rateLimiter(5, 60 * 60_000), async (req, res) => {
+  const artist = db.prepare("SELECT id, name, email FROM users WHERE (id = ? OR artist_slug = ?) AND workspace_visibility = 'public'").get(req.params.id, req.params.id);
+  if (!artist) return res.status(404).json({ error: "Artiste introuvable." });
+  const requesterName = String(req.body.name || "").trim().slice(0, 90);
+  const requesterEmail = String(req.body.email || "").trim().toLowerCase();
+  const eventDate = String(req.body.event_date || "").trim().slice(0, 40);
+  const eventType = String(req.body.event_type || "").trim().slice(0, 80);
+  const message = String(req.body.message || "").trim().slice(0, 1000);
+  if (!requesterName || !requesterEmail || !message) return res.status(400).json({ error: "Nom, email et message requis." });
+  if (!isValidEmail(requesterEmail)) return res.status(400).json({ error: "Email invalide." });
+  const bookingId = id("bkn");
+  db.prepare("INSERT INTO booking_requests (id, artist_id, requester_name, requester_email, event_date, event_type, message) VALUES (?, ?, ?, ?, ?, ?, ?)")
+    .run(bookingId, artist.id, requesterName, requesterEmail, eventDate, eventType, message);
+  await sendEmail({
+    to: artist.email,
+    subject: `Nouvelle demande de booking — ${requesterName}`,
+    html: `<p><strong>${requesterName}</strong> (${requesterEmail}) t'envoie une demande de booking.</p><p><strong>Date :</strong> ${eventDate || "À définir"}</p><p><strong>Type :</strong> ${eventType || "Non précisé"}</p><p><strong>Message :</strong><br/>${message}</p>`
+  });
+  db.prepare("INSERT INTO notifications (id, user_id, type, body) VALUES (?, ?, 'booking', ?)")
+    .run(id("ntf"), artist.id, `Nouvelle demande de booking de ${requesterName}`);
+  res.json({ ok: true, booking_id: bookingId });
+});
+
+// ── Signal score (computed on-the-fly for a release) ────────────────────────
+app.get("/api/releases/:id/signal", (req, res) => {
+  const release = db.prepare("SELECT id, plays, downloads, sales FROM releases WHERE id = ?").get(req.params.id);
+  if (!release) return res.status(404).json({ error: "Release introuvable." });
+  const likes = db.prepare("SELECT COUNT(*) total FROM likes WHERE release_id = ?").get(req.params.id).total;
+  const reposts = db.prepare("SELECT COUNT(*) total FROM reposts WHERE release_id = ?").get(req.params.id).total;
+  const comments = db.prepare("SELECT COUNT(*) total FROM release_comments WHERE release_id = ?").get(req.params.id).total;
+  const plays = Number(release.plays || 0);
+  const downloads = Number(release.downloads || 0);
+  const score = Math.min(100, Math.floor(
+    (plays * 0.4) / 50 +
+    (likes * 2) +
+    (downloads * 3) +
+    (reposts * 5) +
+    (comments * 2) +
+    (Number(release.sales || 0) * 8)
+  ));
+  res.json({ score, plays, likes, reposts, comments, downloads, sales: Number(release.sales || 0) });
+});
+
+// ── Crate drop (weekly editorial — staff-curated) ───────────────────────────
+app.get("/api/crate-drop", (_req, res) => {
+  const drops = db.prepare(`
+    ${releaseSelect(`WHERE ${publicReleaseWhere("r")}`, "r.plays DESC, r.created_at DESC")}
+    LIMIT 6
+  `).all();
+  res.json({ releases: presentReleases(drops), week: new Date().toISOString().slice(0, 10) });
 });
 
 app.use((err, _req, res, next) => {
