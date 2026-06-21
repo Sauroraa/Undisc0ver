@@ -4182,6 +4182,15 @@ function Artists({ notify }) {
 function ArtistProfile({ id, notify, playRelease }) {
   const { data, loading, error } = useData(`/artists/${id}`, [id]);
   const [showBooking, setShowBooking] = useState(false);
+  const [avatarErr, setAvatarErr] = useState(false);
+  const [bannerErr, setBannerErr] = useState(false);
+
+  useEffect(() => {
+    setAvatarErr(false);
+    setBannerErr(false);
+    setShowBooking(false);
+  }, [id]);
+
   if (loading) return <main className="page"><SkeletonList /></main>;
   if (error) return <ErrorPage message={error} />;
   const { artist, releases } = data;
@@ -4197,8 +4206,6 @@ function ArtistProfile({ id, notify, playRelease }) {
     await navigator.clipboard?.writeText(profileUrl);
     notify("Profile link copied.");
   };
-  const [avatarErr, setAvatarErr] = useState(false);
-  const [bannerErr, setBannerErr] = useState(false);
   const avatarSrc = !avatarErr && (artist.logo_url || artist.avatar_url);
   const bannerSrc = !bannerErr && artist.banner_url;
 
