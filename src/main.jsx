@@ -2512,19 +2512,79 @@ function UserMenu({ user, logout }) {
 
 // ── New pages: Feed, Playlists, Genre, Reset Password, Checkout Success ─────
 function FeedPage({ notify, playRelease }) {
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const { data, loading } = useData("/feed", [user?.id]);
+  if (authLoading) return <main className="page"><SkeletonList /></main>;
   if (!user) return <AuthRequired />;
   const releases = data?.releases || [];
   return (
-    <main className="page">
-      <PageHeader eyebrow="Feed" title="Sorties des artistes que tu suis." text="Reste à jour sur les drops de ta crate." />
-      {loading ? <SkeletonList /> : releases.length ? (
-        <ReleaseRows releases={releases} notify={notify} playRelease={playRelease} />
-      ) : (
-        <EmptyCatalogState title="Feed vide" text="Suis des artistes pour voir leurs drops ici." />
-      )}
+    <main className="page feed-page">
+      <section className="feed-hero">
+        <div>
+          <span className="eyebrow">Ton feed</span>
+          <h1>Les nouveaux drops,<br /><em>sans le bruit.</em></h1>
+          <p>Retrouve les dernières sorties des artistes que tu suis, écoute-les et réagis directement.</p>
+        </div>
+        <div className="feed-hero-stat"><strong>{releases.length}</strong><span>nouvelle{releases.length !== 1 ? "s" : ""} sortie{releases.length !== 1 ? "s" : ""}</span></div>
+      </section>
+
+      <div className="feed-layout">
+        <section className="feed-timeline" aria-label="Sorties suivies">
+          {loading ? <SkeletonList /> : releases.length ? releases.map((release) => (
+            <FeedReleaseCard key={release.id} release={release} notify={notify} playRelease={playRelease} />
+          )) : (
+            <div className="feed-empty"><UserPlus size={24} /><h2>Ton feed est encore calme</h2><p>Suis quelques artistes pour voir leurs prochaines sorties apparaître ici.</p><a className="button accent" href="/artists">Découvrir des artistes</a></div>
+          )}
+        </section>
+
+        <aside className="feed-side-card">
+          <span className="eyebrow">Ta sélection</span>
+          <h2>Un feed construit par toi.</h2>
+          <p>Chaque follow affine cette page. Aucun classement sponsorisé ne se mélange aux artistes que tu as choisis.</p>
+          <div><Heart size={16} /><span>Like les releases à garder</span></div>
+          <div><RefreshCw size={16} /><span>Reposte les meilleurs drops</span></div>
+          <a href="/artists">Gérer mes artistes <ArrowRight size={14} /></a>
+        </aside>
+      </div>
     </main>
+  );
+}
+
+function feedTimeAgo(value) {
+  const elapsed = Date.now() - new Date(value).getTime();
+  if (!Number.isFinite(elapsed) || elapsed < 60_000) return "à l'instant";
+  if (elapsed < 3_600_000) return `il y a ${Math.floor(elapsed / 60_000)} min`;
+  if (elapsed < 86_400_000) return `il y a ${Math.floor(elapsed / 3_600_000)} h`;
+  const days = Math.floor(elapsed / 86_400_000);
+  return days < 30 ? `il y a ${days} j` : new Date(value).toLocaleDateString("fr-FR", { day: "numeric", month: "short" });
+}
+
+function FeedReleaseCard({ release, notify, playRelease }) {
+  const profileHref = artistPath({ id: release.user_id, artist_slug: release.artist_slug });
+  return (
+    <article className="feed-release-card">
+      <header className="feed-release-head">
+        <a href={profileHref}><AvatarImg src={release.avatar_url} fallback={release.avatar || release.artist?.[0]} size={42} /></a>
+        <div><a href={profileHref}>{release.artist}</a><span>vient de publier un nouveau drop</span></div>
+        <time dateTime={release.created_at}>{feedTimeAgo(release.created_at)}</time>
+      </header>
+
+      <div className="feed-release-content">
+        <a className="feed-release-cover" href={`/release/${release.id}`}><PackArtwork release={release} large /><span>{release.kind}</span></a>
+        <div className="feed-release-copy">
+          <div className="feed-release-labels"><span>{release.genre}</span><em className={release.free ? "free" : ""}>{releasePrice(release)}</em></div>
+          <h2><a href={`/release/${release.id}`}>{release.title}</a></h2>
+          <p>{release.description || `${release.tracks} track${release.tracks > 1 ? "s" : ""} · ${release.duration} · disponible maintenant sur Undiscover.`}</p>
+          <div className="feed-release-stats"><span><Play size={13} /> {shortNumber(release.plays)} écoutes</span><span><Heart size={13} /> {shortNumber(release.likes)} likes</span><span><MessageCircle size={13} /> {shortNumber(release.comments)} commentaires</span></div>
+          <div className="feed-release-actions">
+            <button className="button accent" type="button" onClick={() => playRelease(release)}><Play size={15} fill="currentColor" /> Écouter</button>
+            <LikeButton release={release} notify={notify} />
+            <RepostButton releaseId={release.id} notify={notify} />
+            <a className="button ghost feed-open-release" href={`/release/${release.id}`}>Voir la release <ArrowUpRight size={14} /></a>
+          </div>
+        </div>
+      </div>
+    </article>
   );
 }
 
