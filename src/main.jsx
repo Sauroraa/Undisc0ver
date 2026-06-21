@@ -2232,57 +2232,150 @@ function NewsletterInput() {
   );
 }
 
+const LS_TOPICS = [
+  { id: "Upload help",      label: "Upload / Catalog",   icon: Upload,       desc: "Audio, cover, metadata ou publication bloquée." },
+  { id: "Download gate",    label: "Download gate",       icon: ArrowDownToLine, desc: "Problème avec like/follow/share gate." },
+  { id: "Payouts",          label: "Paiements",           icon: Wallet,       desc: "Retrait, revenus, balance artiste." },
+  { id: "Copyright review", label: "Copyright",           icon: ShieldCheck,  desc: "Signalement DMCA, droits, blocage." },
+  { id: "Account access",   label: "Compte & accès",      icon: CircleUserRound, desc: "Login, profil, rôle ou accès workspace." },
+];
+
 function LiveSupport({ notify }) {
   const { user } = useAuth();
   const [open, setOpen] = useState(false);
-  const [form, setForm] = useState({
-    name: user?.name || "",
-    email: user?.email || "",
-    topic: "Live support",
-    message: ""
-  });
+  const [step, setStep] = useState("topic"); // "topic" | "form" | "done"
+  const [form, setForm] = useState({ name: "", email: "", topic: "", message: "" });
+  const [sending, setSending] = useState(false);
   const [ticket, setTicket] = useState(null);
-  const update = (key, value) => setForm((current) => ({ ...current, [key]: value }));
+
+  // Auto-fill when user logs in
+  useEffect(() => {
+    if (user) setForm(f => ({ ...f, name: f.name || user.name || "", email: f.email || user.email || "" }));
+  }, [user?.id]);
+
+  const update = (key, val) => setForm(f => ({ ...f, [key]: val }));
+
+  const selectTopic = (id) => { update("topic", id); setStep("form"); };
+
   const send = async () => {
     if (!form.message.trim() || !form.email.trim() || !form.name.trim()) return;
+    setSending(true);
     try {
-      const data = await request("/support/tickets", {
-        method: "POST",
-        body: JSON.stringify(form)
-      });
+      const data = await request("/support/tickets", { method: "POST", body: JSON.stringify(form) });
       setTicket(data.ticket);
-      setForm((current) => ({ ...current, message: "" }));
-      notify(`Ticket ${data.ticket.id} opened.`);
-    } catch (err) {
-      notify(err.message);
-    }
+      setStep("done");
+      notify("Ticket envoyé. L'équipe répond sous 24h.");
+    } catch (err) { notify(err.message); }
+    finally { setSending(false); }
   };
+
+  const reset = () => { setStep("topic"); setForm({ name: user?.name || "", email: user?.email || "", topic: "", message: "" }); setTicket(null); };
+  const close = () => setOpen(false);
+  const charLeft = 600 - (form.message?.length || 0);
+
+  const currentTopic = LS_TOPICS.find(t => t.id === form.topic);
+
   return (
-    <div className={open ? "live-support open" : "live-support"}>
+    <div className="ls-root">
+      {/* Panel */}
       {open && (
-        <div className="live-support-panel">
-          <div><b>Live support</b><button onClick={() => setOpen(false)} aria-label="Close live support"><X size={15} /></button></div>
-          <p>Open a real staff ticket for gates, payouts, copyright review or catalog setup.</p>
-          <div className="live-support-fields">
-            <input value={form.name} onChange={(event) => update("name", event.target.value)} placeholder="Name" />
-            <input type="email" value={form.email} onChange={(event) => update("email", event.target.value)} placeholder="Email" />
-            <select value={form.topic} onChange={(event) => update("topic", event.target.value)}>
-              <option>Live support</option>
-              <option>Upload issue</option>
-              <option>Download gate</option>
-              <option>Payouts</option>
-              <option>Copyright review</option>
-            </select>
+        <div className="ls-panel" role="dialog" aria-modal="true" aria-label="Support">
+          {/* Header */}
+          <div className="ls-header">
+            <div className="ls-header-left">
+              <div className="ls-avatar"><HeadsetIcon size={16} /></div>
+              <div>
+                <span className="ls-title">Support Undisc0ver</span>
+                <span className="ls-status"><i className="ls-dot" />En ligne · Répond sous 24h</span>
+              </div>
+            </div>
+            <button className="ls-close" onClick={close} aria-label="Fermer"><X size={16} /></button>
           </div>
-          <textarea value={form.message} onChange={(event) => update("message", event.target.value)} placeholder="Write your message..." />
-          {ticket && <span className="ticket-confirmation">Ticket {ticket.id} · {ticket.status}</span>}
-          <button className="button accent" onClick={send}><MessageCircle size={16} /> Send ticket</button>
+
+          {/* Body */}
+          <div className="ls-body">
+
+            {/* Step 1 : topic */}
+            {step === "topic" && (
+              <div className="ls-step ls-step-topic">
+                <p className="ls-intro">Quel est le sujet de ta demande ?</p>
+                <div className="ls-topics">
+                  {LS_TOPICS.map(({ id, label, icon: Icon, desc }) => (
+                    <button key={id} className="ls-topic-btn" onClick={() => selectTopic(id)} type="button">
+                      <span className="ls-topic-icon"><Icon size={15} /></span>
+                      <div className="ls-topic-text"><strong>{label}</strong><span>{desc}</span></div>
+                      <ChevronRight size={14} className="ls-topic-arrow" />
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Step 2 : form */}
+            {step === "form" && (
+              <div className="ls-step ls-step-form">
+                <button className="ls-back" onClick={() => setStep("topic")} type="button">
+                  <ChevronLeft size={14} /> {currentTopic?.label}
+                </button>
+                <div className="ls-fields">
+                  <div className="ls-row2">
+                    <div className="ls-field">
+                      <label>Nom</label>
+                      <input value={form.name} onChange={e => update("name", e.target.value)} placeholder="Ton nom" autoComplete="name" />
+                    </div>
+                    <div className="ls-field">
+                      <label>Email</label>
+                      <input type="email" value={form.email} onChange={e => update("email", e.target.value)} placeholder="ton@email.com" autoComplete="email" />
+                    </div>
+                  </div>
+                  <div className="ls-field">
+                    <label>Message</label>
+                    <textarea
+                      value={form.message}
+                      onChange={e => update("message", e.target.value.slice(0, 600))}
+                      placeholder="Décris ton problème en détail…"
+                      rows={5}
+                    />
+                    <span className={`ls-char ${charLeft < 60 ? "warn" : ""}`}>{charLeft} caractères restants</span>
+                  </div>
+                </div>
+                <button
+                  className="ls-send"
+                  onClick={send}
+                  disabled={sending || !form.message.trim() || !form.email.trim() || !form.name.trim()}
+                  type="button"
+                >
+                  {sending ? <Loader2 size={15} className="spin" /> : <MessageCircle size={15} />}
+                  {sending ? "Envoi…" : "Envoyer le ticket"}
+                </button>
+              </div>
+            )}
+
+            {/* Step 3 : done */}
+            {step === "done" && (
+              <div className="ls-step ls-step-done">
+                <div className="ls-done-icon"><CircleCheck size={36} /></div>
+                <strong>Ticket envoyé !</strong>
+                <p>Ton ticket <code>#{ticket?.id?.slice(-8)}</code> a bien été reçu. L'équipe te répondra par email sous 24h.</p>
+                <button className="ls-send ls-send-ghost" onClick={reset} type="button">Nouvelle demande</button>
+              </div>
+            )}
+
+          </div>
+
+          {/* Footer */}
+          <div className="ls-footer">
+            <ShieldCheck size={12} />
+            <span>Ton message est transmis directement au staff Undisc0ver.</span>
+          </div>
         </div>
       )}
-      <button className="live-support-button" onClick={() => setOpen((value) => !value)}>
-        <HeadsetIcon size={18} />
-        <span>Live support</span>
-        <i />
+
+      {/* FAB trigger */}
+      <button className={`ls-fab ${open ? "active" : ""}`} onClick={() => setOpen(v => !v)} aria-label="Support" type="button">
+        {open ? <X size={18} /> : <HeadsetIcon size={18} />}
+        {!open && <span>Support</span>}
+        {!open && <i className="ls-fab-dot" />}
       </button>
     </div>
   );

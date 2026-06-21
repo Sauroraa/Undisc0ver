@@ -261,8 +261,8 @@ dashboardsRouter.get("/staff", authMiddleware, (req, res) => {
     campaigns_pending: db.prepare("SELECT COUNT(*) total FROM promotion_campaigns WHERE status = 'under_review'").get().total,
     campaigns_today: db.prepare("SELECT COUNT(*) total FROM promotion_campaigns WHERE date(created_at) = ?").get(today).total,
     tickets_open: db.prepare("SELECT COUNT(*) total FROM support_tickets WHERE status = 'open'").get().total,
-    tickets_resolved_week: db.prepare("SELECT COUNT(*) total FROM support_tickets WHERE status = 'resolved' AND date(updated_at) >= ?").get(week).total,
-    takedowns_open: db.prepare("SELECT COUNT(*) total FROM takedown_reports WHERE status = 'pending'").get().total,
+    tickets_resolved_week: db.prepare("SELECT COUNT(*) total FROM support_tickets WHERE status = 'resolved' AND date(created_at) >= ?").get(week).total,
+    takedowns_open: db.prepare("SELECT COUNT(*) total FROM takedown_reports WHERE status = 'open'").get().total,
   };
 
   const tickets = db.prepare(`
@@ -303,23 +303,23 @@ dashboardsRouter.get("/moderator", authMiddleware, (req, res) => {
   if (!requireRole(req, res, ["moderator", "admin"])) return;
 
   const overview = {
-    reports_open: db.prepare("SELECT COUNT(*) total FROM takedown_reports WHERE status = 'pending'").get().total,
+    reports_open: db.prepare("SELECT COUNT(*) total FROM takedown_reports WHERE status = 'open'").get().total,
     releases_in_review: db.prepare("SELECT COUNT(*) total FROM releases WHERE moderation_status = 'review'").get().total,
     releases_blocked: db.prepare("SELECT COUNT(*) total FROM releases WHERE moderation_status = 'blocked'").get().total,
     campaigns_pending: db.prepare("SELECT COUNT(*) total FROM promotion_campaigns WHERE status = 'under_review'").get().total,
-    users_suspended: db.prepare("SELECT COUNT(*) total FROM users WHERE role = 'suspended'").get().total || 0,
+    users_suspended: 0,
     security_warnings: db.prepare("SELECT COUNT(*) total FROM security_logs WHERE severity = 'warning' AND created_at >= date('now','-7 days')").get().total,
   };
 
   const reports = db.prepare(`
-    SELECT tr.*, r.title release_title, r.user_id artist_id, r.cover_url,
-           u.name reporter_name, u.email reporter_email,
+    SELECT tr.id, tr.release_id, tr.reporter_name, tr.reporter_email, tr.rights_owner,
+           tr.reason, tr.evidence_url, tr.status, tr.created_at,
+           r.title release_title, r.user_id artist_id, r.cover_url,
            a.name artist_name
     FROM takedown_reports tr
     JOIN releases r ON r.id = tr.release_id
-    LEFT JOIN users u ON u.id = tr.reporter_id
     JOIN users a ON a.id = r.user_id
-    ORDER BY CASE tr.status WHEN 'pending' THEN 0 ELSE 1 END, tr.created_at DESC
+    ORDER BY CASE tr.status WHEN 'open' THEN 0 ELSE 1 END, tr.created_at DESC
     LIMIT 100
   `).all();
 
@@ -389,7 +389,7 @@ dashboardsRouter.get("/admin", authMiddleware, (req, res) => {
     revenue_week: db.prepare("SELECT COALESCE(SUM(amount_cents), 0) total FROM purchases WHERE date(created_at) >= ?").get(week).total,
     sales_total: db.prepare("SELECT COUNT(*) total FROM purchases WHERE amount_cents > 0").get().total,
     users_pro: db.prepare("SELECT COUNT(*) total FROM users WHERE pro = 1").get().total,
-    reports_open: db.prepare("SELECT COUNT(*) total FROM takedown_reports WHERE status = 'pending'").get().total,
+    reports_open: db.prepare("SELECT COUNT(*) total FROM takedown_reports WHERE status = 'open'").get().total,
     security_warnings: db.prepare("SELECT COUNT(*) total FROM security_logs WHERE severity = 'warning' AND created_at >= date('now','-7 days')").get().total,
     payout_pending: db.prepare("SELECT COUNT(*) total FROM payout_requests WHERE status = 'pending'").get().total,
   };
@@ -437,12 +437,13 @@ dashboardsRouter.get("/admin", authMiddleware, (req, res) => {
   `).all();
 
   const reports = db.prepare(`
-    SELECT tr.*, r.title release_title, a.name artist_name, u.name reporter_name
+    SELECT tr.id, tr.release_id, tr.reporter_name, tr.reporter_email, tr.rights_owner,
+           tr.reason, tr.evidence_url, tr.status, tr.created_at,
+           r.title release_title, a.name artist_name
     FROM takedown_reports tr
     JOIN releases r ON r.id = tr.release_id
     JOIN users a ON a.id = r.user_id
-    LEFT JOIN users u ON u.id = tr.reporter_id
-    ORDER BY tr.created_at DESC LIMIT 100
+    ORDER BY CASE tr.status WHEN 'open' THEN 0 ELSE 1 END, tr.created_at DESC LIMIT 100
   `).all();
 
   // Time series
