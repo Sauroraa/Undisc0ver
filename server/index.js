@@ -450,6 +450,11 @@ function decryptPayoutDestination(payload) {
   return Buffer.concat([decipher.update(encrypted), decipher.final()]).toString("utf8");
 }
 
+function writeAudit(actorId, action, entityType, entityId = "", details = "") {
+  db.prepare("INSERT INTO audit_logs (id, actor_id, action, entity_type, entity_id, details) VALUES (?, ?, ?, ?, ?, ?)")
+    .run(id("log"), actorId || null, action, entityType, entityId, String(details || "").slice(0, 1000));
+}
+
 function normalizeArtistSlug(value = "") {
   return String(value)
     .trim()
@@ -1179,6 +1184,8 @@ app.post("/api/support/tickets", rateLimiter(5, 60 * 60_000), (req, res) => {
   const ticketId = id("sup");
   db.prepare("INSERT INTO support_tickets (id, user_id, name, email, topic, message) VALUES (?, ?, ?, ?, ?, ?)")
     .run(ticketId, userId || null, name, email, topic, message);
+  db.prepare("INSERT INTO ticket_messages (id, ticket_id, sender_id, sender_type, body) VALUES (?, ?, ?, 'user', ?)").run(id("msg"), ticketId, userId || null, message);
+  db.prepare("INSERT INTO ticket_messages (id, ticket_id, sender_type, body) VALUES (?, ?, 'system', ?)").run(id("msg"), ticketId, "Demande reçue. Un membre de l'équipe Undiscover te répondra ici dès que possible.");
   res.json({ ok: true, ticket: { id: ticketId, status: "open" } });
 });
 
@@ -1331,12 +1338,31 @@ app.get("/api/staff/overview", staffAuth, (req, res) => {
   const tickets = db.prepare("SELECT * FROM support_tickets ORDER BY created_at DESC").all();
   const reports = db.prepare("SELECT tr.*, r.title release_title FROM takedown_reports tr JOIN releases r ON r.id = tr.release_id ORDER BY tr.created_at DESC").all();
   const applications = db.prepare("SELECT * FROM career_applications ORDER BY created_at DESC").all();
+  const ticketMessages = db.prepare("SELECT tm.*, u.name sender_name FROM ticket_messages tm LEFT JOIN users u ON u.id = tm.sender_id ORDER BY tm.created_at ASC").all();
+  const logs = db.prepare("SELECT al.*, u.name actor_name FROM audit_logs al LEFT JOIN users u ON u.id = al.actor_id ORDER BY al.created_at DESC LIMIT 200").all();
+  const activity = {
+    users: db.prepare("SELECT date(created_at) day, COUNT(*) value FROM users WHERE created_at >= datetime('now','-13 days') GROUP BY date(created_at)").all(),
+    releases: db.prepare("SELECT date(created_at) day, COUNT(*) value FROM releases WHERE created_at >= datetime('now','-13 days') GROUP BY date(created_at)").all(),
+    sales: db.prepare("SELECT date(created_at) day, COUNT(*) value FROM purchases WHERE created_at >= datetime('now','-13 days') GROUP BY date(created_at)").all()
+  };
   const payouts = db.prepare("SELECT pr.*, u.name artist_name, u.email artist_email FROM payout_requests pr JOIN users u ON u.id = pr.user_id ORDER BY pr.created_at DESC LIMIT 200").all().map((payout) => {
     if (req.user.role !== "admin") return { ...payout, destination: `••••${payout.destination_last4}`, destination_encrypted: undefined };
     try { return { ...payout, destination: decryptPayoutDestination(payout.destination_encrypted), destination_encrypted: undefined }; }
     catch { return { ...payout, destination: `••••${payout.destination_last4}`, destination_encrypted: undefined }; }
   });
-  res.json({ users, releases: presentReleases(releases), tickets, reports, applications, payouts });
+  res.json({ users, releases: presentReleases(releases), tickets, ticket_messages: ticketMessages, reports, applications, payouts, logs, activity });
+});
+
+app.post("/api/staff/tickets/:id/reply", staffAuth, (req, res) => {
+  const ticket = db.prepare("SELECT * FROM support_tickets WHERE id = ?").get(req.params.id);
+  if (!ticket) return res.status(404).json({ error: "Ticket introuvable." });
+  const body = String(req.body.body || "").trim().slice(0, 2000);
+  if (!body) return res.status(400).json({ error: "Réponse requise." });
+  db.prepare("INSERT INTO ticket_messages (id, ticket_id, sender_id, sender_type, body) VALUES (?, ?, ?, 'staff', ?)").run(id("msg"), ticket.id, req.user.id, body);
+  db.prepare("UPDATE support_tickets SET status = 'pending', assignee_role = ? WHERE id = ?").run(req.user.role, ticket.id);
+  if (ticket.user_id) db.prepare("INSERT INTO notifications (id, user_id, type, body) VALUES (?, ?, 'support', ?)").run(id("ntf"), ticket.user_id, `Nouvelle réponse du support: ${body.slice(0, 120)}`);
+  writeAudit(req.user.id, "ticket.reply", "ticket", ticket.id, body.slice(0, 200));
+  res.json({ ok: true });
 });
 
 app.patch("/api/staff/payouts/:id", staffAuth, (req, res) => {
@@ -1350,6 +1376,7 @@ app.patch("/api/staff/payouts/:id", staffAuth, (req, res) => {
   if (status === "rejected" && !staffNote) return res.status(400).json({ error: "Une raison est requise pour rejeter la demande." });
   db.prepare("UPDATE payout_requests SET status = ?, staff_note = ?, processed_by = ?, processed_at = CURRENT_TIMESTAMP WHERE id = ?")
     .run(status, staffNote, req.user.id, payout.id);
+  writeAudit(req.user.id, `payout.${status}`, "payout", payout.id, staffNote);
   const body = status === "paid" ? `Ton versement de ${(payout.amount_cents / 100).toFixed(2)} EUR a été marqué comme payé.` : status === "approved" ? "Ta demande de versement a été approuvée." : `Ta demande de versement a été rejetée: ${staffNote}`;
   db.prepare("INSERT INTO notifications (id, user_id, type, body) VALUES (?, ?, 'payout', ?)").run(id("ntf"), payout.user_id, body);
   res.json({ ok: true, status });
@@ -1360,6 +1387,7 @@ app.post("/api/staff/users/:id/role", staffAuth, (req, res) => {
   const role = String(req.body.role || "user").toLowerCase();
   if (!["user", "staff", "moderator", "admin"].includes(role)) return res.status(400).json({ error: "Role invalide." });
   db.prepare("UPDATE users SET role = ? WHERE id = ?").run(role, req.params.id);
+  writeAudit(req.user.id, "user.role", "user", req.params.id, role);
   res.json({ ok: true, role });
 });
 
@@ -1368,6 +1396,7 @@ app.post("/api/staff/users/:id/plan", staffAuth, (req, res) => {
   const plan = String(req.body.plan || "free").toLowerCase();
   if (!["free", "pro", "label"].includes(plan)) return res.status(400).json({ error: "Plan invalide." });
   db.prepare("UPDATE users SET plan = ?, pro = ? WHERE id = ?").run(plan, plan === "free" ? 0 : 1, req.params.id);
+  writeAudit(req.user.id, "user.plan", "user", req.params.id, plan);
   res.json({ ok: true, plan });
 });
 
@@ -1385,6 +1414,7 @@ app.post("/api/staff/releases/:id/moderate", staffAuth, (req, res) => {
   const scanStatus = status === "published" ? "clear" : status === "removed" ? "blocked" : status;
   const note = `Staff moderation set release to ${status} by ${req.user.email}.`;
   db.prepare("UPDATE releases SET moderation_status = ?, scan_status = ?, scan_notes = ? WHERE id = ?").run(status, scanStatus, note, req.params.id);
+  writeAudit(req.user.id, "release.moderate", "release", req.params.id, status);
   res.json({ ok: true, status });
 });
 

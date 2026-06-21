@@ -2894,7 +2894,7 @@ function renderRoute(route, notify, playRelease) {
   if (path === "/privacy") return <PrivacyPage />;
   if (path === "/acceptable-use") return <AcceptableUsePage />;
   if (path === "/careers") return <CareersPage />;
-  if (path === "/staff") return <StaffPanel notify={notify} />;
+  if (path === "/staff") return <StaffPanel notify={notify} query={query} />;
   if (path === "/dashboard") return <Dashboard notify={notify} playRelease={playRelease} section="overview" />;
   if (path === "/catalog") return <Dashboard notify={notify} playRelease={playRelease} section="catalog" />;
   if (path === "/analytics") return <Dashboard notify={notify} playRelease={playRelease} section="analytics" />;
@@ -3411,9 +3411,11 @@ function CareersPage() {
   );
 }
 
-function StaffPanel({ notify }) {
+function StaffPanel({ notify, query }) {
   const { user } = useAuth();
+  const [section, setSection] = useState(new URLSearchParams(query || "").get("section") || "overview");
   const [refreshKey, setRefreshKey] = useState(0);
+  const [replyDrafts, setReplyDrafts] = useState({});
   const { data, loading, error } = useData("/staff/overview", [user?.id, refreshKey]);
   if (!user) return <AuthRequired />;
   if (!["staff", "moderator", "admin"].includes(user.role)) return <ErrorPage message="Staff access required." />;
@@ -3456,20 +3458,33 @@ function StaffPanel({ notify }) {
     if (status === "rejected" && !staffNote) return;
     await runStaffAction(() => request(`/staff/payouts/${id}`, { method: "PATCH", body: JSON.stringify({ status, staff_note: staffNote }) }), "Payout updated.");
   };
+  const replyTicket = async (id) => {
+    const body = String(replyDrafts[id] || "").trim();
+    if (!body) return;
+    await runStaffAction(() => request(`/staff/tickets/${id}/reply`, { method: "POST", body: JSON.stringify({ body }) }), "Reply sent.");
+    setReplyDrafts((current) => ({ ...current, [id]: "" }));
+  };
+  const navigation = [
+    ["overview", "Vue d'ensemble", HomeIcon], ["users", "Utilisateurs", Users], ["releases", "Catalogue", Package], ["tickets", "Support", LifeBuoy],
+    ...(canModerate ? [["reports", "Modération", ShieldAlert]] : []), ...(canAdmin ? [["payouts", "Paiements", Wallet], ["logs", "Logs d'audit", FileText]] : []), ["careers", "Recrutement", UserPlus]
+  ];
+  const titles = { overview: "Pilotage du site", users: "Gestion utilisateurs", releases: "Catalogue et sorties", tickets: "Centre de support", reports: "Modération et copyright", payouts: "Gestion des paiements", logs: "Journal d'audit", careers: "Recrutement" };
   return (
     <main className="page dashboard-page">
       <div className="staff-shell">
-        <PageHeader eyebrow="Staff panel" title="Manage the full site." text="Roles, moderation, support tickets and takedowns in one production console." />
-        <section className="dashboard-kpi-grid">
+        <aside className="staff-sidebar"><div><Logo /><span>console {user.role}</span></div><nav>{navigation.map(([id, label, Icon]) => <button key={id} className={section === id ? "active" : ""} onClick={() => setSection(id)}><Icon size={17} /> {label}</button>)}</nav><footer><span className={`role-chip role-${user.role}`}>{user.role}</span><a href="/dashboard">Retour artiste</a></footer></aside>
+        <PageHeader eyebrow={`Panel ${user.role}`} title={titles[section] || "Administration"} text="Console opérationnelle Undiscover avec permissions basées sur les rôles." />
+        {section === "overview" && <section className="dashboard-kpi-grid">
           <Metric icon={<Users />} label="Users" value={data.users.length} delta={`${data.users.filter((u) => u.role !== "user").length} staff`} />
           <Metric icon={<Package />} label="Releases" value={data.releases.length} delta={`${data.releases.filter((r) => r.moderation_status === "review").length} review`} />
           <Metric icon={<LifeBuoy />} label="Tickets" value={data.tickets.length} delta={`${data.tickets.filter((t) => t.status === "open").length} open`} />
           <Metric icon={<ShieldAlert />} label="Reports" value={data.reports.length} delta="copyright" />
           <Metric icon={<UserPlus />} label="Careers" value={(data.applications || []).length} delta={`${(data.applications || []).filter((item) => item.status === "new").length} new`} />
           <Metric icon={<Wallet />} label="Payouts" value={(data.payouts || []).filter((item) => ["pending", "approved"].includes(item.status)).length} delta="finance queue" />
-        </section>
-        <div className="staff-grid">
-          <section className="staff-card">
+        </section>}
+        {section === "overview" && <StaffActivity activity={data.activity} logs={data.logs || []} />}
+        <div className="staff-grid" data-section={section}>
+          <section className="staff-card section-users">
             <SectionTitle title="Accounts and plans" />
             {data.users.map((item) => (
               <div className="staff-row account-row" key={item.id}>
@@ -3494,7 +3509,7 @@ function StaffPanel({ notify }) {
               </div>
             ))}
           </section>
-          <section className="staff-card">
+          <section className="staff-card section-releases">
             <SectionTitle title="Moderation" />
             {data.releases.map((release) => (
               <div className="staff-row moderation-row" key={release.id}>
@@ -3510,11 +3525,11 @@ function StaffPanel({ notify }) {
               </div>
             ))}
           </section>
-          <section className="staff-card">
+          <section className="staff-card section-tickets">
             <SectionTitle title="Live support tickets" />
-            {data.tickets.length ? data.tickets.map((ticket) => <div className="staff-ticket" key={ticket.id}><b>{ticket.topic}</b><p>{ticket.message}</p><small>{ticket.name} - {ticket.email}</small><select value={ticket.status} onChange={(e) => ticketStatus(ticket.id, e.target.value)}><option>open</option><option>pending</option><option>closed</option></select></div>) : <p className="muted">No support tickets yet.</p>}
+            {data.tickets.length ? data.tickets.map((ticket) => <div className="staff-ticket conversation-ticket" key={ticket.id}><div><b>{ticket.topic}</b><small>{ticket.name} · {ticket.email}</small><select value={ticket.status} onChange={(e) => ticketStatus(ticket.id, e.target.value)}><option>open</option><option>pending</option><option>closed</option></select></div><div className="ticket-thread">{(data.ticket_messages || []).filter((message) => message.ticket_id === ticket.id).map((message) => <article className={`ticket-message ${message.sender_type}`} key={message.id}><span>{message.sender_type === "staff" ? message.sender_name || "Staff" : message.sender_type === "system" ? "Undiscover" : ticket.name}</span><p>{message.body}</p><time>{new Date(message.created_at).toLocaleString("fr-FR")}</time></article>)}</div><div className="ticket-reply"><textarea value={replyDrafts[ticket.id] || ""} onChange={(e) => setReplyDrafts((current) => ({ ...current, [ticket.id]: e.target.value }))} placeholder="Répondre au ticket..." /><button className="button accent" onClick={() => replyTicket(ticket.id)}><ArrowUpRight size={15} /> Envoyer</button></div></div>) : <p className="muted">No support tickets yet.</p>}
           </section>
-          <section className="staff-card">
+          <section className="staff-card section-reports">
             <SectionTitle title="Copyright reports" />
             {data.reports.length ? data.reports.map((report) => (
               <div className="staff-ticket" key={report.id}>
@@ -3533,7 +3548,7 @@ function StaffPanel({ notify }) {
               </div>
             )) : <p className="muted">No takedown reports.</p>}
           </section>
-          <section className="staff-card">
+          <section className="staff-card section-careers">
             <SectionTitle title="Career applications" />
             {(data.applications || []).length ? data.applications.map((application) => (
               <div className="staff-ticket career-application-row" key={application.id}>
@@ -3551,7 +3566,7 @@ function StaffPanel({ notify }) {
               </div>
             )) : <p className="muted">No career applications yet.</p>}
           </section>
-          <section className="staff-card staff-payout-card">
+          <section className="staff-card staff-payout-card section-payouts">
             <SectionTitle title="Payout requests" />
             {(data.payouts || []).length ? data.payouts.map((payout) => (
               <div className="staff-payout-row" key={payout.id}>
@@ -3567,10 +3582,25 @@ function StaffPanel({ notify }) {
               </div>
             )) : <p className="muted">No payout requests.</p>}
           </section>
+          <section className="staff-card staff-log-card section-logs"><SectionTitle title="Audit logs" />{(data.logs || []).map((log) => <div className="staff-log-row" key={log.id}><span>{log.action}</span><strong>{log.actor_name || "System"}</strong><small>{log.entity_type} · {log.entity_id || "global"}</small><p>{log.details || "No details"}</p><time>{new Date(log.created_at).toLocaleString("fr-FR")}</time></div>)}</section>
         </div>
       </div>
     </main>
   );
+}
+
+function StaffActivity({ activity = {}, logs = [] }) {
+  const days = Array.from({ length: 14 }, (_, index) => {
+    const date = new Date();
+    date.setDate(date.getDate() - (13 - index));
+    return date.toISOString().slice(0, 10);
+  });
+  const series = [
+    ["Nouveaux utilisateurs", activity.users || [], "users"],
+    ["Sorties publiées", activity.releases || [], "releases"],
+    ["Ventes", activity.sales || [], "sales"]
+  ];
+  return <section className="staff-overview-grid"><div className="staff-activity-card"><div className="playlist-section-head"><div><span className="eyebrow">14 derniers jours</span><h2>Activité de la plateforme</h2></div></div><div className="staff-chart-grid">{series.map(([label, values, key]) => { const map = Object.fromEntries(values.map((item) => [item.day, item.value])); const max = Math.max(1, ...Object.values(map)); return <article key={key}><strong>{label}</strong><div>{days.map((day) => <i key={day} title={`${day}: ${map[day] || 0}`} style={{ height: `${Math.max(5, ((map[day] || 0) / max) * 100)}%` }} />)}</div><small>{values.reduce((sum, item) => sum + Number(item.value), 0)} au total</small></article>; })}</div></div><aside className="staff-recent-log"><span className="eyebrow">Dernières actions</span><h2>Journal récent</h2>{logs.slice(0, 6).map((log) => <div key={log.id}><span>{log.action}</span><small>{log.actor_name || "System"} · {new Date(log.created_at).toLocaleString("fr-FR")}</small></div>)}{!logs.length && <p className="muted">Aucune action enregistrée.</p>}</aside></section>;
 }
 
 function ContainerScroll({ titleComponent, children }) {
