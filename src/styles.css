@@ -7220,9 +7220,24 @@ textarea { min-height: 120px; resize: vertical; }
 }
 
 /* Repost button */
-.repost-button { color: var(--muted, #888); min-width: auto; padding: 0 0.5rem; }
+.engagement-action-wrap { display: inline-flex; position: relative; vertical-align: middle; }
+.engagement-button { align-items: center; display: inline-flex; gap: 6px; justify-content: center; transition: background .16s, border-color .16s, color .16s, transform .16s; }
+.engagement-button:not(:disabled):active { transform: scale(.97); }
+.engagement-button.active { background: #11151a; border: 1px solid rgba(212,232,87,.42); box-shadow: inset 0 0 0 1px rgba(212,232,87,.04); color: var(--accent); }
+.engagement-button.active:hover { background: #171c20; border-color: rgba(212,232,87,.65); }
+.engagement-button span { font-size: inherit; }
+.engagement-button em { align-items: center; background: rgba(255,255,255,.075); border-radius: 999px; color: currentColor; display: inline-flex; font-size: 10px; font-style: normal; justify-content: center; min-width: 19px; padding: 2px 5px; }
+.follow-button.active { min-width: 104px; }
+.like-button.active svg { filter: drop-shadow(0 0 5px rgba(212,232,87,.22)); }
+.repost-button { color: var(--muted, #888); min-width: auto; padding-inline: .65rem; }
 .repost-button.active { color: var(--accent); }
-.repost-button span { font-size: 0.75rem; margin-left: 0.2rem; }
+.engagement-confirm { background: #171720; border: 1px solid rgba(255,255,255,.14); border-radius: 10px; box-shadow: 0 16px 40px rgba(0,0,0,.55); display: grid; gap: 9px; min-width: 210px; padding: 10px; position: absolute; right: 0; top: calc(100% + 7px); z-index: 60; }
+.engagement-confirm::before { background: #171720; border-left: 1px solid rgba(255,255,255,.14); border-top: 1px solid rgba(255,255,255,.14); content: ""; height: 8px; position: absolute; right: 16px; top: -5px; transform: rotate(45deg); width: 8px; }
+.engagement-confirm strong { color: #fff; font-size: 11px; line-height: 1.35; }
+.engagement-confirm > div { display: flex; gap: 6px; justify-content: flex-end; }
+.engagement-confirm button { background: rgba(255,255,255,.055); border: 1px solid var(--line); border-radius: 7px; color: var(--muted); display: inline-flex; font-size: 10px; font-weight: 750; gap: 5px; min-height: 29px; padding: 5px 8px; }
+.engagement-confirm button:hover { color: #fff; }
+.engagement-confirm button.danger { background: rgba(255,91,111,.1); border-color: rgba(255,91,111,.25); color: #ff8d9c; }
 
 /* Sponsored release card */
 .release-card-sponsored { border-color: rgba(212,232,87,.35); position: relative; }

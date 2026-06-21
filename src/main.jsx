@@ -2924,25 +2924,41 @@ function SignalScore({ releaseId }) {
   );
 }
 
+function EngagementConfirmation({ message, confirmLabel, onConfirm, onCancel, busy }) {
+  return (
+    <div className="engagement-confirm" role="alertdialog" aria-label={message}>
+      <strong>{message}</strong>
+      <div><button type="button" onClick={onCancel} disabled={busy}>Annuler</button><button className="danger" type="button" onClick={onConfirm} disabled={busy}>{busy ? <Loader2 className="spin" size={12} /> : confirmLabel}</button></div>
+    </div>
+  );
+}
+
 // ── Repost button ────────────────────────────────────────────────────────────
 function RepostButton({ releaseId, notify, compact = false }) {
   const { user } = useAuth();
   const [state, setState] = useState({ reposted: false, count: 0 });
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
   useEffect(() => {
     request(`/releases/${releaseId}/repost`).then((res) => setState({ reposted: res.reposted, count: res.count })).catch(() => {});
   }, [releaseId]);
   const toggle = async () => {
     if (!user) return navigate("/login");
+    setBusy(true);
     try {
       const res = await request(`/releases/${releaseId}/repost`, { method: "POST" });
-      setState((prev) => ({ reposted: res.reposted, count: prev.count + (res.reposted ? 1 : -1) }));
+      setState((prev) => ({ reposted: res.reposted, count: Math.max(0, prev.count + (res.reposted ? 1 : -1)) }));
+      setConfirming(false);
       notify(res.reposted ? "Reposté." : "Repost retiré.");
-    } catch (err) { notify(err.message); }
+    } catch (err) { notify(err.message); } finally { setBusy(false); }
   };
   return (
-    <button className={`button ghost repost-button ${state.reposted ? "active" : ""}`} onClick={toggle} title="Repost">
-      <RefreshCw size={14} /> {!compact && state.count > 0 && <span>{state.count}</span>}
-    </button>
+    <span className="engagement-action-wrap">
+      <button className={`button ghost engagement-button repost-button ${state.reposted ? "active" : ""}`} onClick={() => state.reposted ? setConfirming(true) : toggle()} title={state.reposted ? "Reposté" : "Reposter"} disabled={busy}>
+        {busy ? <Loader2 className="spin" size={14} /> : <RefreshCw size={14} />} {!compact && <><span>{state.reposted ? "Reposté" : "Reposter"}</span>{state.count > 0 && <em>{state.count}</em>}</>}
+      </button>
+      {confirming && <EngagementConfirmation message="Retirer ce repost ?" confirmLabel="Retirer" onConfirm={toggle} onCancel={() => setConfirming(false)} busy={busy} />}
+    </span>
   );
 }
 
@@ -6955,13 +6971,24 @@ function GateActionIcon({ action, size = 16 }) {
 function LikeButton({ release, notify }) {
   const { user } = useAuth();
   const [likes, setLikes] = useState(release.likes || 0);
-  const click = async () => {
+  const [liked, setLiked] = useState(Boolean(release.liked));
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    request(`/releases/${release.id}/like`).then((data) => { setLiked(data.liked); setLikes(data.count); }).catch(() => {});
+  }, [release.id, user?.id]);
+  const toggle = async () => {
     if (!user) return navigate("/login");
-    const data = await request(`/releases/${release.id}/like`, { method: "POST" });
-    setLikes(data.likes);
-    notify(data.liked ? "Added to liked releases." : "Removed from liked releases.");
+    setBusy(true);
+    try {
+      const data = await request(`/releases/${release.id}/like`, { method: "POST" });
+      setLikes(data.count);
+      setLiked(data.liked);
+      setConfirming(false);
+      notify(data.liked ? "Ajouté aux favoris." : "Retiré des favoris.");
+    } catch (err) { notify(err.message); } finally { setBusy(false); }
   };
-  return <button className="button ghost" onClick={click}><Heart size={16} /> {likes}</button>;
+  return <span className="engagement-action-wrap"><button className={`button ghost engagement-button like-button ${liked ? "active" : ""}`} onClick={() => liked ? setConfirming(true) : toggle()} disabled={busy} title={liked ? "Aimé" : "J'aime"}>{busy ? <Loader2 className="spin" size={16} /> : <Heart size={16} fill={liked ? "currentColor" : "none"} />}<span>{liked ? "Aimé" : "J'aime"}</span><em>{likes}</em></button>{confirming && <EngagementConfirmation message="Retirer ce like ?" confirmLabel="Retirer" onConfirm={toggle} onCancel={() => setConfirming(false)} busy={busy} />}</span>;
 }
 
 function ReleaseDownloadGate({ release, notify }) {
@@ -7095,13 +7122,23 @@ function BuyButton({ release, notify, compact = false }) {
 function FollowButton({ artistId, notify }) {
   const { user } = useAuth();
   const [followed, setFollowed] = useState(false);
-  const click = async () => {
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    request(`/artists/${artistId}/follow`).then((data) => setFollowed(data.followed)).catch(() => {});
+  }, [artistId, user?.id]);
+  if (user?.id === artistId) return null;
+  const toggle = async () => {
     if (!user) return navigate("/login");
-    const data = await request(`/artists/${artistId}/follow`, { method: "POST" });
-    setFollowed(data.followed);
-    notify(data.followed ? "Artist followed." : "Artist unfollowed.");
+    setBusy(true);
+    try {
+      const data = await request(`/artists/${artistId}/follow`, { method: "POST" });
+      setFollowed(data.followed);
+      setConfirming(false);
+      notify(data.followed ? "Artiste suivi." : "Artiste retiré de tes abonnements.");
+    } catch (err) { notify(err.message); } finally { setBusy(false); }
   };
-  return <button className="button accent" onClick={click}><UserPlus size={16} /> {followed ? "Following" : "Follow"}</button>;
+  return <span className="engagement-action-wrap"><button className={`button engagement-button follow-button ${followed ? "active" : "accent"}`} onClick={() => followed ? setConfirming(true) : toggle()} disabled={busy}>{busy ? <Loader2 className="spin" size={16} /> : followed ? <Check size={16} /> : <UserPlus size={16} />}<span>{followed ? "Suivi" : "Suivre"}</span></button>{confirming && <EngagementConfirmation message="Ne plus suivre cet artiste ?" confirmLabel="Ne plus suivre" onConfirm={toggle} onCancel={() => setConfirming(false)} busy={busy} />}</span>;
 }
 
 function ArtistCard({ artist, notify }) {

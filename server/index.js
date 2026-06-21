@@ -1180,11 +1180,23 @@ app.patch("/api/me/settings", auth, (req, res) => {
   }
 });
 
+app.get("/api/artists/:id/follow", optAuth, (req, res) => {
+  const artist = db.prepare("SELECT id FROM users WHERE id = ? OR artist_slug = ?").get(req.params.id, normalizeArtistSlug(req.params.id));
+  if (!artist) return res.status(404).json({ error: "Artiste introuvable." });
+  const followed = req.userId ? !!db.prepare("SELECT 1 FROM follows WHERE follower_id = ? AND artist_id = ?").get(req.userId, artist.id) : false;
+  const followers = db.prepare("SELECT COUNT(*) total FROM follows WHERE artist_id = ?").get(artist.id).total;
+  res.json({ followed, followers });
+});
+
 app.post("/api/artists/:id/follow", auth, (req, res) => {
   if (req.user.id === req.params.id) return res.status(400).json({ error: "Impossible de suivre ton propre profil." });
   const followed = db.prepare("SELECT 1 FROM follows WHERE follower_id = ? AND artist_id = ?").get(req.user.id, req.params.id);
   if (followed) db.prepare("DELETE FROM follows WHERE follower_id = ? AND artist_id = ?").run(req.user.id, req.params.id);
-  else db.prepare("INSERT INTO follows (follower_id, artist_id) VALUES (?, ?)").run(req.user.id, req.params.id);
+  else {
+    db.prepare("INSERT INTO follows (follower_id, artist_id) VALUES (?, ?)").run(req.user.id, req.params.id);
+    db.prepare("INSERT INTO notifications (id, user_id, type, actor_id, body) VALUES (?, ?, 'follow', ?, ?)")
+      .run(id("ntf"), req.params.id, req.user.id, "a commencé à te suivre");
+  }
   res.json({ followed: !followed, followers: db.prepare("SELECT COUNT(*) total FROM follows WHERE artist_id = ?").get(req.params.id).total });
 });
 
@@ -2002,6 +2014,14 @@ app.post("/api/artists/:id/follow-notify", auth, (req, res, next) => {
 });
 
 // Notify on like
+app.get("/api/releases/:id/like", optAuth, (req, res) => {
+  const release = db.prepare("SELECT id FROM releases WHERE id = ? AND moderation_status = 'published'").get(req.params.id);
+  if (!release) return res.status(404).json({ error: "Release introuvable." });
+  const liked = req.userId ? !!db.prepare("SELECT 1 FROM likes WHERE user_id = ? AND release_id = ?").get(req.userId, req.params.id) : false;
+  const count = db.prepare("SELECT COUNT(*) total FROM likes WHERE release_id = ?").get(req.params.id).total;
+  res.json({ liked, count });
+});
+
 app.post("/api/releases/:id/like", auth, (req, res) => {
   const release = db.prepare("SELECT id, user_id, title FROM releases WHERE id = ? AND moderation_status = 'published'").get(req.params.id);
   if (!release) return res.status(404).json({ error: "Release introuvable." });
